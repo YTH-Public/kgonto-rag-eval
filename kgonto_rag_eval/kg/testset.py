@@ -44,6 +44,7 @@ class TestItem(BaseModel):
     evidence_path: list[str]
     evidence_relations: list[str]
     expected_entities: list[str] = Field(default_factory=list)
+    answerable: bool = True   # False 면 그래프/문서에 답이 없어 "모른다"가 정답 (abstention)
     review_status: Literal["pending", "keep", "edit", "drop"] = "pending"
     reviewer_note: str = ""
 
@@ -148,6 +149,11 @@ def validate_item(item: TestItem) -> list[str]:
     issues = []
     if "?" not in item.question:
         issues.append("question_not_interrogative")
+    # abstention(모름) 문항은 근거가 없는 게 정상 -> 근거 관련 검사는 건너뛴다
+    if not item.answerable:
+        if item.evidence_path:
+            issues.append("abstention_should_have_no_evidence")
+        return issues
     evidence_text = " ".join(item.evidence_path)
     for ent in item.expected_entities:
         if ent not in evidence_text and ent not in item.reference:
