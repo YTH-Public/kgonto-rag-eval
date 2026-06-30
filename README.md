@@ -28,7 +28,7 @@ LangChain v1 위에서 동작하며, 세 가지 일을 합니다.
   각 지표는 논문·표준에 근거를 둡니다 (아래 [근거](#근거-논문표준) 참고).
 
 - **KG / 온톨로지 평가**
-  추출한 그래프를 정답(gold)과 비교해 precision / recall / F1 을 내고,
+  추출한 그래프를 정답과 비교해 precision / recall / F1 을 내고,
   허용 타입·관계 같은 스키마 적합성을 검사합니다.
 
 - **평가자 LLM 교체**
@@ -151,7 +151,7 @@ items = generate_testset_from_kg(g, llm, max_per_type=6)
 
 # (3) 자동 검증 -> 사람이 keep / edit / drop 으로 검수 -> 저장
 keep = [it for it in items if not validate_item(it)]
-save_jsonl(keep, "gold_evalset.jsonl")
+save_jsonl(keep, "evalset.jsonl")
 
 # (4) 검수된 셋에 RAG 를 실행해 평가용 데이터셋으로
 ds = to_eval_dataset(keep, rag_fn=my_rag)   # my_rag(question) -> (answer, contexts)
@@ -165,14 +165,14 @@ ds = to_eval_dataset(keep, rag_fn=my_rag)   # my_rag(question) -> (answer, conte
 
 ## KG / 온톨로지 평가
 
-추출한 지식그래프를 정답(gold)과 비교하거나, 스키마 적합성을 검사합니다.
+추출한 지식그래프를 정답과 비교하거나, 스키마 적합성을 검사합니다.
 LLM 없이 계산하는 결정적 방식입니다.
 
 ```python
 from kgonto_rag_eval.kg import compare_kg, check_ontology
 
-# 추출 KG vs gold: 트리플 precision / recall / F1 + 누락 / 추가
-print(compare_kg(pred_relations, gold_relations))
+# 추출 KG vs 정답: 트리플 precision / recall / F1 + 누락 / 추가
+print(compare_kg(pred_relations, reference_relations))
 
 # 온톨로지 적합성: 허용 타입·관계 화이트리스트, dangling 관계, 클래스 계층
 report = check_ontology(entities, relations,
@@ -204,9 +204,9 @@ from kgonto_rag_eval.kg import (
 # 검색이 정답 경로의 엔티티를 가져왔나 (텍스트=벡터 RAG / 트리플=그래프 RAG 동일 기준)
 path_recall(item.evidence_path, retrieved_contexts)     # {"path_recall": 0.667, ...}
 
-# 검색 트리플이 gold 근거 트리플을 덮었나
-gold = path_triples(item.evidence_path, item.evidence_relations)
-triple_coverage(gold, retrieved_triples)                # {"triple_coverage": 0.5, ...}
+# 검색 트리플이 정답 근거 트리플을 덮었나
+reference = path_triples(item.evidence_path, item.evidence_relations)
+triple_coverage(reference, retrieved_triples)           # {"triple_coverage": 0.5, ...}
 
 # 검색·KG 항목이 원문 출처(page / chunk)로 추적되나
 source_traceability(retrieved_docs)                     # {"traceability_rate": 0.92, ...}
@@ -218,11 +218,11 @@ non_isolated_node_ratio(entities, relations)
 
 | 함수 | 보는 것 | 근거 |
 |---|---|---|
-| `compare_kg` | 추출 KG vs gold 트리플 P / R / F1 | KG 구축 P/R/F1 (Mondal et al. 2021) |
+| `compare_kg` | 추출 KG vs 정답 트리플 P / R / F1 | KG 구축 P/R/F1 (Mondal et al. 2021) |
 | `schema_violation_rate` | 허용 타입·관계·dangling 위반 비율 | RDF 제약 검증 (W3C SHACL) |
 | `non_isolated_node_ratio` | 엣지를 가진 노드 비율 (구조 보조 지표) | GraphRAG-Bench |
 | `path_recall` | 정답 경로 엔티티를 검색이 회수한 비율 | 정보검색 Recall@k 를 KG 에 적용 |
-| `triple_coverage` | gold 근거 트리플을 검색이 덮은 비율 | RAGAS context recall + 트리플 recall (조합) |
+| `triple_coverage` | 정답 근거 트리플을 검색이 덮은 비율 | RAGAS context recall + 트리플 recall (조합) |
 | `source_traceability` | 출처 메타데이터 보유 비율 | ALCE attribution 을 결정적으로 축소 |
 
 모두 0.0 부터 1.0 사이의 비율과 함께, 누락·추가 목록 같은 상세 정보를 dict 로 돌려줍니다.

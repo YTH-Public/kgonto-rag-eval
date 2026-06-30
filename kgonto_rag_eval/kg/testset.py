@@ -98,7 +98,7 @@ def generate_testset_from_kg(
     """KG 를 순회해 평가셋 후보를 생성한다(review_status='pending').
 
     같은 근거가 과도하게 반복되지 않도록 hop 길이별 max_per_type 개만 취한다(결정적: 앞에서부터).
-    최종 gold 는 사람이 keep/edit/drop 으로 검수해 고정하는 것을 전제로 한다.
+    최종 정답 데이터는 사람이 keep/edit/drop 으로 검수해 고정하는 것을 전제로 한다.
     """
     personas = personas or DEFAULT_PERSONAS
     paths = enumerate_paths(graph, min_hops, max_hops)

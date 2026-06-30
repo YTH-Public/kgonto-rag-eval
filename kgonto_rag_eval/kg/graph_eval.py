@@ -1,6 +1,6 @@
 """KG/온톨로지 평가 (결정적, LLM 불필요).
 
-- compare_kg: 추출 KG vs gold KG 의 트리플 precision/recall/F1.
+- compare_kg: 추출 KG vs 정답 KG 의 트리플 precision/recall/F1.
   근거: 관계추출/KG 구축의 트리플 단위 P/R/F1 (head·relation·tail 정확 일치;
         예: Mondal et al. 2021, "End-to-End NLP Knowledge Graph Construction", arXiv:2106.01167).
 - check_ontology / schema_violation_rate: 허용 타입·관계 위반, dangling 관계 검사.
@@ -25,9 +25,9 @@ def _as_triples(x: Any) -> set[tuple]:
     return out
 
 
-def compare_kg(pred: Iterable, gold: Iterable) -> dict:
-    """추출 KG(pred) 를 gold 와 트리플 단위로 비교. precision/recall/F1 + 누락/추가."""
-    P, G = _as_triples(pred), _as_triples(gold)
+def compare_kg(pred: Iterable, reference: Iterable) -> dict:
+    """추출 KG(pred)를 정답(reference)과 트리플 단위로 비교합니다. precision/recall/F1 + 누락/추가."""
+    P, G = _as_triples(pred), _as_triples(reference)
     tp = len(P & G)
     precision = tp / len(P) if P else 0.0
     recall = tp / len(G) if G else 0.0
@@ -41,9 +41,9 @@ def compare_kg(pred: Iterable, gold: Iterable) -> dict:
         "f1_raw": f1,
         "matched": tp,
         "pred_total": len(P),
-        "gold_total": len(G),
-        "missing": sorted(G - P),   # gold 에 있는데 못 뽑음
-        "extra": sorted(P - G),     # pred 에만 있음(노이즈 또는 gold 누락)
+        "reference_total": len(G),
+        "missing": sorted(G - P),   # 정답에 있는데 못 뽑음
+        "extra": sorted(P - G),     # pred 에만 있음(노이즈 또는 정답 누락)
     }
 
 

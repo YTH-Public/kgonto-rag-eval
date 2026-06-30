@@ -4,9 +4,9 @@
 답변 점수(RAGAS 계열) 와 분리해, 검색 단계의 성공/실패를 먼저 드러내기 위한 지표입니다.
 
 지표와 근거:
-- path_recall: 정보검색 Recall@k 표준을 KG 근거 경로(엔티티)에 적용한 graph-aware recall.
-- triple_coverage: RAGAS context recall(Es et al. 2024, arXiv:2309.15217) 과 KG 트리플 recall 을
-  결합한 project-defined metric (표준 단일 지표가 아니라 수업용 조합 지표).
+- path_recall: 정보검색의 Recall@k 표준을 KG 근거 경로(엔티티)에 적용한 형태입니다.
+- triple_coverage: RAGAS context recall(Es et al. 2024, arXiv:2309.15217)과 KG 트리플 recall 을
+  합친, 이 프로젝트에서 정의한 지표입니다(표준 단일 지표는 아닙니다).
 """
 from __future__ import annotations
 
@@ -76,42 +76,42 @@ def path_triples(evidence_path: list[str], evidence_relations: list[str]) -> lis
             for i in range(len(evidence_relations))]
 
 
-def path_recall(gold_entities: Iterable[str], retrieved: Any) -> dict:
-    """gold 근거 경로의 엔티티 중 검색 결과에 나타난 비율 (graph-aware recall).
+def path_recall(reference_entities: Iterable[str], retrieved: Any) -> dict:
+    """정답 근거 경로의 엔티티 중 검색 결과에 나타난 비율입니다.
 
-    gold_entities: 정답 근거 경로의 노드 이름들 (예: TestItem.evidence_path).
-    retrieved: 검색 결과. 텍스트 / 문자열 리스트 / langchain Document 리스트 / (s,rel,o) 트리플 모두 가능.
-        벡터 RAG(텍스트)와 그래프 RAG(트리플) 에 같은 기준으로 적용해 baseline 비교가 됩니다.
+    reference_entities: 정답 근거 경로의 노드 이름들 (예: TestItem.evidence_path).
+    retrieved: 검색 결과. 텍스트 / 문자열 리스트 / langchain Document 리스트 / (s,rel,o) 트리플 모두 가능합니다.
+        벡터 RAG(텍스트)와 그래프 RAG(트리플)에 같은 기준으로 적용해 baseline 비교가 됩니다.
 
-    근거: 정보검색의 Recall@k 표준을 KG 근거 경로에 적용한 graph-aware recall 입니다
-    (Recall@k 자체는 IR 표준 지표, 경로 적용은 GraphRAG 평가 관행).
+    근거: 정보검색의 Recall@k 표준을 KG 근거 경로에 적용한 형태입니다
+    (Recall@k 자체는 IR 표준 지표, 경로 적용은 이 프로젝트에서 정의했습니다).
     """
-    gold = [g for g in gold_entities if g]
+    refs = [g for g in reference_entities if g]
     text = _as_text(retrieved)
-    found = [g for g in gold if _entity_in_text(g, text)]
-    recall = len(found) / len(gold) if gold else 0.0
+    found = [g for g in refs if _entity_in_text(g, text)]
+    recall = len(found) / len(refs) if refs else 0.0
     return {
         "path_recall": round(recall, 3),
         "found": found,
-        "missing": [g for g in gold if g not in found],
-        "gold_total": len(gold),
+        "missing": [g for g in refs if g not in found],
+        "reference_total": len(refs),
     }
 
 
-def triple_coverage(gold_triples: Iterable, retrieved_triples: Iterable) -> dict:
-    """gold 근거 트리플 중 검색 결과 트리플이 덮은 비율 (트리플 단위 recall).
+def triple_coverage(reference_triples: Iterable, retrieved_triples: Iterable) -> dict:
+    """정답 근거 트리플 중 검색 결과 트리플이 덮은 비율입니다 (트리플 단위 recall).
 
     트리플을 돌려주는 검색기(그래프/하이브리드)용입니다. 검색이 텍스트만 주면 path_recall 을 쓰세요.
 
-    근거: RAGAS context recall(Es et al. 2024, arXiv:2309.15217) 과 KG 트리플 recall 을
-    결합한 project-defined metric 입니다(표준 단일 지표가 아니라 수업용 조합 지표).
+    근거: RAGAS context recall(Es et al. 2024, arXiv:2309.15217)과 KG 트리플 recall 을
+    합친, 이 프로젝트에서 정의한 지표입니다(표준 단일 지표는 아닙니다).
     """
-    gold, ret = _triples(gold_triples), _triples(retrieved_triples)
-    covered = gold & ret
-    cov = len(covered) / len(gold) if gold else 0.0
+    refs, ret = _triples(reference_triples), _triples(retrieved_triples)
+    covered = refs & ret
+    cov = len(covered) / len(refs) if refs else 0.0
     return {
         "triple_coverage": round(cov, 3),
         "covered": sorted(covered),
-        "missing": sorted(gold - ret),
-        "gold_total": len(gold),
+        "missing": sorted(refs - ret),
+        "reference_total": len(refs),
     }

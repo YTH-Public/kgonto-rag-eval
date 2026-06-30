@@ -14,16 +14,16 @@ from kgonto_rag_eval.kg import (
 
 
 def test_path_recall_text_and_triples():
-    gold = ["삼성전자", "DS부문", "밸류체인 탄소감축"]
+    ref = ["삼성전자", "DS부문", "밸류체인 탄소감축"]
     # 텍스트(벡터 RAG) 검색 결과: 2/3 등장
     text = "삼성전자는 DS부문을 두고 있다. 자세한 활동은 보고서 참조."
-    r = path_recall(gold, text)
+    r = path_recall(ref, text)
     assert r["path_recall"] == round(2 / 3, 3), r
     assert "밸류체인 탄소감축" in r["missing"]
     # 트리플(그래프 RAG) 검색 결과: 3/3 등장
     triples = [("삼성전자", "HAS_DIVISION", "DS부문"),
                ("DS부문", "RUNS_INITIATIVE", "밸류체인 탄소감축")]
-    assert path_recall(gold, triples)["path_recall"] == 1.0
+    assert path_recall(ref, triples)["path_recall"] == 1.0
 
 
 def test_path_recall_avoids_prefix_substring_false_positive():
@@ -39,10 +39,10 @@ def test_path_recall_accepts_single_structured_item():
 
 
 def test_triple_coverage():
-    gold = [("삼성전자", "HAS_DIVISION", "DS부문"),
+    ref = [("삼성전자", "HAS_DIVISION", "DS부문"),
             ("DS부문", "RUNS_INITIATIVE", "밸류체인 탄소감축")]
     retrieved = [("삼성전자", "HAS_DIVISION", "DS부문")]   # 1/2 덮음
-    c = triple_coverage(gold, retrieved)
+    c = triple_coverage(ref, retrieved)
     assert c["triple_coverage"] == 0.5, c
     assert ("DS부문", "RUNS_INITIATIVE", "밸류체인 탄소감축") in c["missing"]
 
@@ -96,8 +96,8 @@ def test_non_isolated_node_ratio():
 
 def test_compare_kg_still_triple_prf1():
     pred = [("A", "R", "B"), ("A", "R", "X")]
-    gold = [("A", "R", "B"), ("A", "R", "C")]
-    rep = compare_kg(pred, gold)
+    ref = [("A", "R", "B"), ("A", "R", "C")]
+    rep = compare_kg(pred, ref)
     assert rep["matched"] == 1 and rep["precision"] == 0.5 and rep["recall"] == 0.5, rep
 
 
