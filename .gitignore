@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 환경/비밀
+.env
+.env.*
+.venv/
+venv/
+
+# 에디터/OS
+.vscode/
+.idea/
+.DS_Store
+desktop.ini
+
+# 노트북 체크포인트
+.ipynb_checkpoints/
