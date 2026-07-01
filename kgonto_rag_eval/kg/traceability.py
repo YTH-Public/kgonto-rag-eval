@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 # 출처로 인정하는 메타데이터 키 (하나라도 값이 있으면 추적 가능으로 봅니다)
-_SOURCE_KEYS = ("source_id", "source", "page", "chunk_id", "chunk", "doc_id", "url")
+_SOURCE_KEYS = ("source_id", "source", "source_page", "page", "chunk_id", "chunk", "doc_id", "url")
 
 
 def _has_source(item: Any) -> bool:
