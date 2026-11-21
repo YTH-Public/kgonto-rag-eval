@@ -1,8 +1,12 @@
 """스모크 테스트: 근거 있는 답은 높게, 환각 답은 낮게 채점되는지 확인.
 
-실제 gpt-5.4-mini 를 호출하므로 OPENAI_API_KEY 가 필요합니다.
-    python tests/test_metrics.py
+실제 모델을 호출하므로 OPENAI_API_KEY 가 필요합니다(없으면 건너뜀). CI 에서는 이 폴더를 빼고 돌립니다.
+    python -m pytest -q tests/live
 """
+import os
+
+import pytest
+
 from kgonto_rag_eval import EvaluationDataset, evaluate
 from kgonto_rag_eval.metrics import AnswerCorrectness, ContextRecall, Faithfulness
 
@@ -25,6 +29,7 @@ HALLUCINATED = {
 }
 
 
+@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY 없음")
 def test_faithfulness_separates_grounded_and_hallucinated():
     ds = EvaluationDataset.from_list([GROUNDED, HALLUCINATED])
     report = evaluate(ds, metrics=[Faithfulness(), ContextRecall(), AnswerCorrectness()])

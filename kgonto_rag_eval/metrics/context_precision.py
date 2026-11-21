@@ -1,4 +1,9 @@
-"""ContextPrecision: 관련 문맥이 상위에 랭크됐는가 (순위 인식). 리랭커/top-k 품질."""
+"""ContextPrecision: 관련 문맥이 상위에 랭크됐는가 (순위 인식). 리랭커/top-k 품질.
+
+reference 를 쓰지 않는 판입니다. RAGAS 0.4.4 에서는 reference 를 쓰는 판이 ContextPrecision,
+쓰지 않는 판이 ContextUtilization 이라는 이름입니다. 순위 점수 계산(average precision)은 같아도
+관련 표시를 만드는 프롬프트가 다르므로 같은 점수가 나온다고 보면 안 됩니다.
+"""
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -49,8 +54,9 @@ class ContextPrecision(Metric):
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=f"질문: {sample.user_input}\n\n검색 문맥(순서대로):\n{sample.context_text}"),
         ])
-        flags = list(v.relevant_flags)[:n]
-        flags += [False] * (n - len(flags))   # 부족하면 무관으로 채움
+        flags = list(v.relevant_flags)
+        if len(flags) != n:   # 개수가 다르면 어느 문맥의 판정인지 알 수 없음
+            return self.judge_error(f"판정 {len(flags)}개, 문맥 {n}개로 개수가 다릅니다.", raw=v.model_dump())
         score = round(_average_precision(flags), 3)
         verdict = MetricResult.verdict_from_score(score)
         return MetricResult(

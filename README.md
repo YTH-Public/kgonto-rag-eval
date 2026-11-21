@@ -1,288 +1,223 @@
 # kgonto-rag-eval
 
-지식그래프와 온톨로지에 잘 맞는 **RAG 평가 프레임워크**입니다.
+지식그래프와 온톨로지에 잘 맞는 **RAG 평가 프레임워크**입니다. (v0.2.0)
 
-LangChain v1 위에서 동작하며, 세 가지 일을 합니다.
+LangChain v1 위에서 동작하며, 네 가지 일을 합니다.
 
 - LLM 으로 RAG 답변을 채점합니다 (LLM-as-judge).
-- 지식그래프를 순회해 평가셋을 자동으로 만듭니다.
-- 만들어진 지식그래프와 온톨로지의 품질까지 봅니다.
+- 지식그래프를 순회해 평가셋 초안을 만들고, 누수를 점검합니다.
+- 만들어진 지식그래프와 온톨로지의 품질, 검색이 가져온 근거를 LLM 없이 봅니다.
+- 답의 인용(출처 표시)을 검사하고, 평가 결과를 기준선과 비교합니다.
 
-의존성은 가볍습니다 (`langchain-openai`, `pydantic`).
+의존성은 가볍습니다 (`langchain`, `langchain-openai`, `pydantic`).
 평가에 쓰는 LLM 은 직접 넣어 바꿀 수 있습니다.
 
-## 핵심 기능
-
-- **RAG 답변 평가**
-  LLM 으로 채점하는 지표 6종입니다 (faithfulness, context relevance / precision / recall, answer correctness / relevancy).
-  점수와 함께 판정(verdict)과 실패 원인을 돌려줍니다.
-
-- **지식그래프 기반 평가셋 생성**
-  그래프를 순회해 single-hop / multi-hop 질문과 정답을 자동으로 만듭니다.
-  페르소나를 적용하며, 자동 생성물은 초안이므로 사람이 검수해 확정합니다.
-
-- **검색·근거·구조 평가 (LLM 없이 계산)**
-  검색이 정답 근거를 실제로 가져왔는지(path recall, triple coverage),
-  근거가 원문으로 추적되는지(source traceability),
-  그래프가 스키마를 지키고 잘 연결됐는지(schema violation rate, non-isolated node ratio)를 봅니다.
-  각 지표는 논문·표준에 근거를 둡니다 (아래 [근거](#근거-논문표준) 참고).
-
-- **KG / 온톨로지 평가**
-  추출한 그래프를 정답과 비교해 precision / recall / F1 을 내고,
-  허용 타입·관계 같은 스키마 적합성을 검사합니다.
-
-- **평가자 LLM 교체**
-  기본은 OpenAI 모델이지만, `evaluate(..., llm=...)` 로 어떤 LangChain 챗모델이든 넣을 수 있습니다.
-
-## 왜 만들었나
-
-RAGAS, DeepEval 같은 기존 도구는 훌륭합니다.
-다만 최신 LangChain v1.x 와 신형 OpenAI 모델 조합에서 의존성·파라미터 충돌을 겪기도 합니다.
-
-2026-06 에 실제로 겪은 예시입니다.
-
-- `ragas 0.4.3` 이 이미 제거된 `langchain_community.chat_models.vertexai` 를 import 합니다.
-- 내부 평가자가 신형 모델이 거부하는 `max_tokens` 를 보냅니다.
-
-그래서 이 패키지는 기존 도구의 좋은 관례(`EvaluationDataset`, metric 객체, `evaluate()`)는 참고하되,
-**함수형(SystemMessage / HumanMessage) 호출과 직접 주입하는 LLM** 으로 가볍게 다시 구현했습니다.
-
-특정 RAGAS 버전이 항상 깨진다는 뜻은 아닙니다.
-환경 충돌을 피하고, 평가자 모델과 프롬프트를 직접 통제하고 싶을 때 쓰기 좋은 경량 대안입니다.
-
 ## 설치
+
+학생 · 수업용(버전 고정):
+
+```bash
+pip install "kgonto-rag-eval[kg,pandas] @ git+https://github.com/YTH-Public/kgonto-rag-eval@v0.2.0"
+```
+
+코드를 고치며 쓸 때:
 
 ```bash
 git clone https://github.com/YTH-Public/kgonto-rag-eval.git
 cd kgonto-rag-eval
-
-pip install .                 # 코어 (RAG 답변 평가 지표)
-pip install ".[kg]"           # + 지식그래프 평가셋 생성 / KG·온톨로지 평가 (networkx)
-pip install ".[kg,pandas]"    # + report.to_pandas()
-```
-
-코드를 고치며 쓸 거라면 editable 설치를 권장합니다.
-
-```bash
 pip install -e ".[kg,pandas]"
 ```
 
 `uv` 를 쓴다면 `pip` 자리에 `uv pip` 를 그대로 넣으면 됩니다.
+기본 평가자는 OpenAI 모델이라 **`OPENAI_API_KEY`** 가 필요합니다 (환경변수 또는 `.env`).
 
-평가자 LLM 은 기본이 OpenAI 모델이라 **`OPENAI_API_KEY`** 가 필요합니다 (환경변수 또는 `.env`).
-다른 모델을 쓰려면 `evaluate(..., llm=...)` 로 LangChain 챗모델을 넣으면 됩니다.
+## 왜 만들었나
 
-```python
-import os
-os.environ["OPENAI_API_KEY"] = "sk-..."   # 또는 python-dotenv 로 .env 로드
-```
+RAGAS, DeepEval 같은 기존 도구는 훌륭합니다. 다만 2026년에 이런 일이 있었습니다.
+
+- RAGAS 는 0.4.3(2026-01) 뒤로 정식 릴리스가 10개월 비었습니다.
+  그동안 `langchain-community` 0.4 에서 `import ragas` 가 깨지고, 새 OpenAI 모델에 `max_tokens` 를 보내 거부당했습니다.
+  두 문제는 0.4.4(2026-11-14)에서 고쳐졌습니다.
+- DeepEval 은 활발하지만 이름이 계속 바뀝니다(`GPTModel` → `OpenAIModel`, `LLMTestCaseParams` → `SingleTurnParams`).
+- 무엇보다 **같은 이름의 지표도 도구마다 정의가 다릅니다**(아래 [지표 정의 비교](#지표-정의-비교)).
+
+그래서 이 패키지는 기존 도구의 좋은 관례(`EvaluationDataset`, metric 객체, `evaluate()`)를 따르되,
+**프롬프트와 계산이 다 보이는 짧은 코드**로 다시 구현했습니다. 지표를 읽고 고쳐 보는 교재로 쓰기 좋게 만들었습니다.
+기존 도구를 대신하기보다 함께 놓고 비교하는 용도를 권합니다.
 
 ## RAG 답변 평가
 
 ```python
+from langchain.chat_models import init_chat_model
 from kgonto_rag_eval import EvaluationDataset, evaluate
-from kgonto_rag_eval.metrics import (
-    Faithfulness, ContextRelevance, ContextPrecision,
-    ContextRecall, AnswerCorrectness, AnswerRelevancy,
-)
+from kgonto_rag_eval.metrics import Faithfulness, ContextRecall, AnswerCorrectness
 
 ds = EvaluationDataset.from_list([
     {
-        "user_input": "이 제품의 보증 기간은?",
-        "retrieved_contexts": ["본 제품의 보증 기간은 구매일로부터 2년이다."],
-        "response": "구매일로부터 2년입니다.",
-        "reference": "구매일로부터 2년",
+        "sample_id": "P001",                       # 기준선 비교 · 원인 추적용
+        "user_input": "청년 월세 지원은 한 달에 얼마까지인가요?",
+        "retrieved_contexts": ["월 최대 20만 원을 최장 24개월 지원한다."],   # 그때 실제로 검색된 근거
+        "response": "월 최대 20만 원입니다.",
+        "reference": "월 최대 20만 원",
+        "metadata": {"split": "튜닝"},
     },
 ])
 
-report = evaluate(ds, metrics=[Faithfulness(), ContextRecall(), AnswerCorrectness()])
-print(report.summary)        # 지표별 평균
-report.to_pandas()           # 샘플별 점수표 ([pandas] extra)
+judge = init_chat_model("openai:gpt-6-luna", reasoning_effort="none")
+report = evaluate(ds, metrics=[Faithfulness(), ContextRecall(), AnswerCorrectness()], llm=judge)
+print(report.summary)   # 지표별 평균(유효 점수만)
+print(report.stats)     # 지표별 평균 · 유효 · 누락 · 오류 개수
+report.to_pandas()      # 행마다 점수 · 판정 세부(__details) · 오류(__error)
 ```
 
-평가자 LLM 을 직접 넣을 수도 있습니다 (피평가 모델과 같거나 더 강한 모델을 권장합니다).
-
-```python
-from langchain.chat_models import init_chat_model
-
-judge = init_chat_model("openai:gpt-5.4-mini")
-report = evaluate(ds, metrics=[Faithfulness()], llm=judge)
-```
-
-`retrieved_contexts` 는 문자열 리스트와 langchain `Document` 리스트를 모두 받습니다.
+- `retrieved_contexts` 는 문자열 목록이나 langchain `Document` 목록입니다. 문자열 하나를 그대로 넣으면 오류입니다(v0.1 은 글자 단위로 쪼갰습니다).
+- judge 출력이 규칙을 어기면(개수가 음수, 번호 중복 등) 점수를 만들지 않고 `error` 로 남깁니다. 호출이 실패해도 전체가 멈추지 않습니다.
+- 평가자와 답을 만든 모델이 같으면 후하게 채점하는 경향이 있습니다. 중요한 평가는 다른 · 더 강한 모델로 교차하고 표본을 사람이 봅니다.
 
 ### 지표
 
-| 지표 | 무엇을 보나 | reference 필요 |
+| 지표 | 무엇을 보나 | reference |
 |---|---|---|
-| `Faithfulness` | 답변의 주장이 검색 문맥에 근거하는가 (환각 탐지) | 아니오 |
-| `ContextRelevance` | 검색된 문맥이 질문에 관련 있는가 (문맥별 평균) | 아니오 |
-| `ContextPrecision` | 관련 문맥이 상위에 랭크됐는가 (순위 반영) | 아니오 |
-| `ContextRecall` | 기준 정답의 핵심 근거가 검색 문맥에 들어있는가 | 예 |
-| `AnswerCorrectness` | 답변이 기준 정답과 의미·사실이 일치하는가 (factual F1 + semantic) | 예 |
-| `AnswerRelevancy` | 답변이 질문 의도·범위에 직접 답했는가 (사실성과 별개) | 아니오 |
+| `Faithfulness` | 답의 주장 중 검색 문맥이 뒷받침하는 비율 | 필요 없음 |
+| `ContextRelevance` | 검색 문맥마다 relevant / partial / irrelevant 판정 후 평균 | 필요 없음 |
+| `ContextPrecision` | 관련 문맥이 위에 있는지(average precision) | 필요 없음 |
+| `ContextRecall` | 기준 정답의 핵심 주장 중 검색 문맥에 근거가 있는 비율(질문도 함께 봄) | 필요 |
+| `AnswerCorrectness` | 사실 P/R 의 F1 × 0.6 + 의미 적합도 × 0.4 | 필요 |
+| `AnswerRelevancy` | 질문의 의도 중 답이 직접 다룬 비율 - 장황함 감점 | 필요 없음 |
 
-점수는 모두 0.0 부터 1.0 사이입니다.
+점수는 0.0 ~ 1.0, 판정(`verdict`)은 0.8 이상 pass · 0.5 이상 partial · 나머지 fail 입니다.
 
-판정(`verdict`: pass / partial / fail)과 실패 위치(`failed_component`: retriever / generator / reference)도 함께 나옵니다.
+### 지표 정의 비교
 
-`reference` 가 없으면 reference 가 필요한 지표는 `None` 으로 둡니다.
-`evaluate(..., keep_reason=True)`(기본값)이면 지표별 판단 이유(`reason`)도 행에 남습니다.
+이름이 같아도 계산이 다릅니다. 점수를 도구끼리 평균 내거나 승자를 정하지 마세요.
 
-## 지식그래프 기반 평가셋 생성
+| 지표 | RAGAS 논문(2309.15217) | RAGAS 0.4.4 | DeepEval 4.3.4 | 이 패키지 |
+|---|---|---|---|---|
+| Faithfulness | 답의 주장 중 문맥에서 추론되는 비율 | 같은 방식(주장 나누기 → 판정) | 모순만 깎음(기본 `penalize_ambiguous_claims=False` 라 애매한 주장은 통과) | 주장 지원 비율, 근거 없는 주장 목록 |
+| Answer relevancy | 답에서 질문을 거꾸로 만들어 원질문과 임베딩 유사도 | 같은 방식(코사인이라 척도가 낮게 나올 수 있음) | 답의 문장 중 질문과 관련된 비율 | 질문 의도 중 다룬 비율 - 장황함 감점(임베딩 안 씀) |
+| Context relevance | 문맥에서 필요한 문장 비율 | 두 판정 프롬프트의 0 · 1 · 2 등급 평균 | (Contextual Relevancy) 문맥 문장 중 관련 비율 | 문맥 조각마다 3단계 판정 평균 |
+| Context precision | (논문에 없음) | reference 있는 판 `ContextPrecision`, 없는 판 `ContextUtilization` | reference 사용 | reference 없이 average precision |
+| Context recall | (논문에 없음) | 정답 주장 중 문맥에서 찾은 비율 | 비슷 | 비슷, 질문을 함께 줌 |
+| Answer correctness | (논문에 없음) | 사실 F1 + 의미 유사도 가중합 | G-Eval 등으로 직접 정의 | 사실 F1 0.6 + 의미 적합도 0.4 |
 
-문서에서 평가 질문을 일일이 손으로 만들기는 어렵습니다.
-지식그래프를 순회하면 single-hop / multi-hop 질문과 정답을 자동으로 만들 수 있습니다.
-자동 생성물은 초안이므로, 사람이 검수해 확정합니다.
-
-```python
-from langchain.chat_models import init_chat_model
-from kgonto_rag_eval.kg import (
-    load_kg, generate_testset_from_kg, validate_item, save_jsonl, to_eval_dataset,
-)
-
-# (1) KG 적재: {name, type} / {source, relation, target} JSON, 또는 (s, rel, o) 트리플
-g = load_kg(entities="entities.json", relations="relations.json")
-# g = load_kg(triples=[("A", "HAS_PART", "B"), ...])
-
-# (2) KG 순회 -> 페르소나 / 질문유형 -> LLM 으로 질문·정답 생성 (사실은 KG 경로에서만)
-llm = init_chat_model("openai:gpt-5.4-mini")
-items = generate_testset_from_kg(g, llm, max_per_type=6)
-
-# (3) 자동 검증 -> 사람이 keep / edit / drop 으로 검수 -> 저장
-keep = [it for it in items if not validate_item(it)]
-save_jsonl(keep, "evalset.jsonl")
-
-# (4) 검수된 셋에 RAG 를 실행해 평가용 데이터셋으로
-ds = to_eval_dataset(keep, rag_fn=my_rag)   # my_rag(question) -> (answer, contexts)
-```
-
-각 샘플은 근거 경로(`evidence_path`)를 보존합니다.
-그래서 나중에 답이 왜 맞고 틀렸는지 되짚어 보기 좋습니다.
-
-페르소나는 `DEFAULT_PERSONAS` 를 쓰거나,
-`auto_personas_from_graph(g, llm)` 로 후보를 뽑아 골라 쓰면 됩니다.
-
-## KG / 온톨로지 평가
-
-추출한 지식그래프를 정답과 비교하거나, 스키마 적합성을 검사합니다.
-LLM 없이 계산하는 결정적 방식입니다.
-
-```python
-from kgonto_rag_eval.kg import compare_kg, check_ontology
-
-# 추출 KG vs 정답: 트리플 precision / recall / F1 + 누락 / 추가
-print(compare_kg(pred_relations, reference_relations))
-
-# 온톨로지 적합성: 허용 타입·관계 화이트리스트, dangling 관계, 클래스 계층
-report = check_ontology(entities, relations,
-                        allowed_types={"Company", "Product", ...},
-                        allowed_relations={"PRODUCES", "HAS_PART", ...})
-print(report["ok"], report["issues"])
-```
-
-`check_ontology` 의 `ok` 는 "허용 타입·관계 화이트리스트와 dangling 검사를 통과했다"는 뜻입니다.
-관계별 domain / range 추론까지 하지는 않습니다.
-
-## 검색·근거·구조 평가
-
-지식그래프 RAG 는 답변 점수만 보면 충분하지 않습니다.
-
-- 필요한 근거(경로·트리플)를 검색이 실제로 가져왔는지 (검색 품질)
-- 그래프 자체가 잘 만들어졌는지 (구축 품질)
-
-이 두 가지를 LLM 없이 결정적으로 봅니다.
-평가셋의 근거 경로(`evidence_path`)를 정답 근거로 사용합니다.
+## 지식그래프 기반 평가셋 만들기
 
 ```python
 from kgonto_rag_eval.kg import (
-    path_recall, triple_coverage, path_triples,         # 검색 품질
-    source_traceability,                                # 근거 추적성
-    schema_violation_rate, non_isolated_node_ratio,     # 구축 품질
+    load_kg, generate_testset_from_kg, validate_item, leakage_report, save_jsonl, to_eval_dataset,
 )
 
-# 검색이 정답 경로의 엔티티를 가져왔나 (텍스트=벡터 RAG / 트리플=그래프 RAG 동일 기준)
-path_recall(item.evidence_path, retrieved_contexts)     # {"path_recall": 0.667, ...}
+g = load_kg(entities="entities.json", relations="relations.json")   # subject/object 칸도 받음
+items = generate_testset_from_kg(g, judge, max_per_type=6)          # review_status='pending' 초안
 
-# 검색 트리플이 정답 근거 트리플을 덮었나
+# (1) 자동 검사 (2) 누수 점검 (3) 사람이 keep / edit / drop 으로 검수
+print([validate_item(it) for it in items])
+print(leakage_report(items))
+items[0].review_status = "keep"
+save_jsonl(items, "evalset.jsonl")
+
+# 승인된(keep · edit) 문항만 RAG 를 실행해 평가 데이터로
+ds = to_eval_dataset(items, rag_fn=my_rag)   # my_rag(question) -> (answer, 실제로 검색된 contexts)
+```
+
+- `load_kg` 는 같은 두 노드 사이의 관계를 모두 남깁니다(MultiDiGraph).
+- `validate_item` 을 통과해도 진짜 multi-hop 이라는 보장은 아닙니다. 핵심 엣지 하나를 가려도 답할 수 있는지 사람이 확인하세요.
+- `leakage_report` 는 정답이 질문에 그대로 든 문항과, 같은 근거 경로가 여러 split 에 들어간 경우를 찾습니다.
+  평가셋을 만든 KG 와 채점 정답이 같은 KG 라서 생기는 순환은 코드로 잡을 수 없습니다.
+
+## 검색 · 근거 · 구조 평가 (LLM 없이)
+
+```python
+from kgonto_rag_eval.kg import (
+    path_entity_recall, triple_coverage, path_triples,
+    source_traceability, compare_kg, check_ontology, schema_violation_rate, non_isolated_node_ratio,
+)
+
+path_entity_recall(item.evidence_path, retrieved)            # 이름만 봄(방향이 틀려도 1.0)
 reference = path_triples(item.evidence_path, item.evidence_relations)
-triple_coverage(reference, retrieved_triples)           # {"triple_coverage": 0.5, ...}
+triple_coverage(reference, retrieved_triples)                # 관계 · 방향까지 봄
 
-# 검색·KG 항목이 원문 출처(page / chunk)로 추적되나
-source_traceability(retrieved_docs)                     # {"traceability_rate": 0.92, ...}
+# 추출 KG vs 정답: 같은 정리 함수를 양쪽에, 문서 범위 안에서만 비교
+compare_kg(pred_rows, gold_rows, normalize=lambda s: s.replace("(주)", ""), scope=("rcept_no",))
 
-# 그래프가 스키마를 지켰나 / 고립된 노드는 없나
-schema_violation_rate(entities, relations, allowed_types, allowed_relations)
-non_isolated_node_ratio(entities, relations)
+# 스키마: 허용 타입 · 관계 + (주어 타입, 관계, 목적어 타입) 패턴
+schema_violation_rate(entities, relations, allowed_types={"회사", "품목"},
+                      allowed_patterns={("회사", "공급", "회사"), ("회사", "매입", "품목")})
 ```
 
-| 함수 | 보는 것 | 근거 |
+| 함수 | 보는 것 | 근거 · 성격 |
 |---|---|---|
-| `compare_kg` | 추출 KG vs 정답 트리플 P / R / F1 | KG 구축 P/R/F1 (Mondal et al. 2021) |
-| `schema_violation_rate` | 허용 타입·관계·dangling 위반 비율 | RDF 제약 검증 (W3C SHACL) |
-| `non_isolated_node_ratio` | 엣지를 가진 노드 비율 (구조 보조 지표) | GraphRAG-Bench |
-| `path_recall` | 정답 경로 엔티티를 검색이 회수한 비율 | 정보검색 Recall@k 를 KG 에 적용 |
-| `triple_coverage` | 정답 근거 트리플을 검색이 덮은 비율 | RAGAS context recall + 트리플 recall (조합) |
-| `source_traceability` | 출처 메타데이터 보유 비율 | ALCE attribution 을 결정적으로 축소 |
+| `compare_kg` | 추출 KG vs 정답 트리플 P / R / F1, 누락 · 추가 | 트리플 P/R/F1 (Mondal et al. 2021, arXiv:2106.01167) |
+| `check_ontology` · `schema_violation_rate` | 허용 타입 · 관계 · 패턴 · dangling 위반 | W3C SHACL 의 동기. 추론 엔진 아님 |
+| `non_isolated_node_ratio` | 엣지를 가진 노드 비율 | 이 프로젝트의 구조 보조 지표 |
+| `path_entity_recall` | 정답 경로 이름이 검색 결과에 나온 비율 | Recall@k 를 경로 이름에 옮긴 이 프로젝트의 지표 |
+| `triple_coverage` | 정답 근거 트리플을 검색 트리플이 덮은 비율 | RAGAS context recall 의 생각을 트리플에 옮긴 이 프로젝트의 지표 |
+| `source_traceability` | 출처 칸(page · chunk · provenance 등)이 있는 비율 | 출처가 **붙었는지**만 봄. 관계의 `source` 칸(주어)은 출처로 세지 않음 |
 
-모두 0.0 부터 1.0 사이의 비율과 함께, 누락·추가 목록 같은 상세 정보를 dict 로 돌려줍니다.
+`path_recall` 은 v0.1 이름으로 남겨 두었습니다(= `path_entity_recall`).
 
-답변 지표(faithfulness 등)와 합치면 "검색 단계 -> 답변 단계" 를 나눠서 볼 수 있습니다.
+## 인용 검사
 
-표준 지표가 없는 조합 지표(`path_recall` 의 경로 적용, `triple_coverage`, `non_isolated_node_ratio`)는
-이 프로젝트에서 정의한 지표임을 함수 docstring 에 적어 두었습니다.
+```python
+from kgonto_rag_eval import split_cited_sentences, resolve_citations, quote_in_source, citation_support
+
+corpus = {"35": "...35쪽 원문...", "36": "...36쪽 원문..."}
+answer = "월 최대 20만 원입니다 [p.35]. 최장 24개월입니다 [p.36]."
+
+split_cited_sentences(answer)            # 문장마다 출처 ID
+resolve_citations(["35", "99"], corpus)  # ① 출처 ID 가 실제 자료로 풀리는가
+quote_in_source("월 최대 20만 원", corpus["35"])   # ② 인용 문구가 그대로 있는가(공백 무시)
+citation_support(answer, corpus, judge, question="...")  # ③ 그 문장을 출처가 뒷받침하는가(LLM)
+```
+
+세 검사는 서로 다릅니다. 같은 쪽에 숫자가 있어도 다른 대상에 대한 숫자일 수 있습니다.
+`citation_support` 는 ALCE(Gao et al. 2023, arXiv:2305.14627)의 citation recall / precision 아이디어를
+LLM 판정으로 줄인 **수업용 지표**입니다(원 논문은 NLI 모델로 판정).
+
+## 두 답 비교 (pairwise)
+
+```python
+from kgonto_rag_eval import pairwise_judge
+pairwise_judge(question, answer_a, answer_b, judge, criteria="금액 · 기간 · 대상 조건이 정확한가")
+# {"ab": "A", "ba": "B", "consistent": False, "final": "inconsistent"}
+```
+
+순서를 바꿔 두 번 묻고 답 ID 로 되돌립니다. 두 결과가 다르면 승자를 정하지 않습니다(위치 편향, MT-Bench arXiv:2306.05685).
+
+## 기준선 · 회귀 테스트
+
+```python
+from kgonto_rag_eval import save_baseline, compare_baseline
+save_baseline(report, "baseline.json", meta={"dataset": "policy-v1", "judge": "gpt-6-luna", "prompt": "v3"})
+result = compare_baseline(new_report, "baseline.json", tolerance=0.1)
+assert result["ok"], result
+```
+
+같은 `sample_id` 끼리, 양쪽 모두 점수가 있는 행만 짝지어 평균을 비교합니다. 원점수(반올림 전)를 저장합니다.
+LLM 판정은 실행마다 흔들리므로 허용 폭(`tolerance`)과 반복 횟수를 정해 두세요.
+CI 에서는 API 없이 도는 테스트(`tests/test_*.py`)만 돌리고, 실호출 테스트(`tests/live/`)는 따로 실행합니다.
 
 ## 한계
 
-- 평가자(judge)와 피평가 모델이 같으면 편향이 생깁니다.
-  자기 답을 후하게 보거나, 긴 답을 선호하거나, 같은 지식 공백을 공유합니다.
-  점수는 절대 품질이 아니라, 그 평가자 프롬프트 아래에서의 상대 지표로 보는 것이 맞습니다.
-  중요한 평가는 `evaluate(..., llm=<더 강한 모델>)` 로 교차검증하고, 표본을 사람이 검수해야 합니다.
-
-- LLM 평가자는 빠르고 방향은 맞지만, 절대값보다는 변경 전후의 비교로 쓰는 편이 안전합니다.
-
+- 점수는 그 평가자 · 프롬프트 아래의 상대 지표입니다. 변경 전후 비교와 사람 검수 표본으로 쓰세요.
 - 작은 그래프는 의미 있는 multi-hop 질문 수가 적습니다.
-  관계를 더 촘촘히 하거나 원문 청크 근거를 붙이면 나아집니다.
+- `normalize` 를 넓게 잡으면(모든 괄호 · 공백 제거) 서로 다른 대상이 합쳐집니다.
 
-## 근거 (논문·표준)
+## 근거 (논문 · 표준)
 
-지표는 임의로 고르지 않고 아래 표준·논문에 맞췄습니다.
+- **RAGAS** - Es et al., *Ragas: Automated Evaluation of Retrieval Augmented Generation*. [arXiv:2309.15217](https://arxiv.org/abs/2309.15217)
+  원 논문이 정의한 것은 faithfulness · answer relevance · context relevance 셋입니다.
+  context precision / recall · answer correctness 는 그 뒤 라이브러리가 더한 지표이고,
+  이 패키지의 프롬프트 · 가중치(0.6 / 0.4 등)는 이 프로젝트가 정한 것입니다.
+- **ALCE** - Gao et al., *Enabling Large Language Models to Generate Text with Citations*. [arXiv:2305.14627](https://arxiv.org/abs/2305.14627) - `citation_support`
+- **MT-Bench** - Zheng et al., *Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena*. [arXiv:2306.05685](https://arxiv.org/abs/2306.05685) - `pairwise_judge`
+- **KG 구축 P/R/F1** - Mondal et al., *End-to-End NLP Knowledge Graph Construction*. [arXiv:2106.01167](https://arxiv.org/abs/2106.01167) - `compare_kg`
+- **W3C SHACL** - [w3.org/TR/shacl](https://www.w3.org/TR/shacl/) - 스키마 검사의 동기
+- **GraphRAG-Bench** - [arXiv:2506.02404](https://arxiv.org/abs/2506.02404) - 구축 · 검색 · 생성을 나눠 보는 관점
 
-- **RAGAS**
-  Es et al., *Automated Evaluation of Retrieval Augmented Generation*. [arXiv:2309.15217](https://arxiv.org/abs/2309.15217)
-  faithfulness, context relevance / precision / recall, answer correctness / relevancy 의 근거입니다.
+## 변경 기록
 
-- **ALCE**
-  Gao et al., *Enabling Large Language Models to Generate Text with Citations*. [arXiv:2305.14627](https://arxiv.org/abs/2305.14627)
-  `source_traceability`(attribution) 의 근거입니다.
-
-- **KG 구축 P/R/F1**
-  Mondal et al., *End-to-End NLP Knowledge Graph Construction*. [arXiv:2106.01167](https://arxiv.org/abs/2106.01167)
-  `compare_kg` 의 트리플 P/R/F1 근거입니다.
-
-- **W3C SHACL**
-  *Shapes Constraint Language*. [w3.org/TR/shacl](https://www.w3.org/TR/shacl/)
-  `schema_violation_rate`(스키마 제약 검증)의 동기입니다.
-
-- **GraphRAG-Bench**
-  *Challenging Domain-Specific Reasoning for Evaluating Graph RAG*. [arXiv:2506.02404](https://arxiv.org/abs/2506.02404)
-  구축·검색·생성을 나눠 평가하는 관점과 `non_isolated_node_ratio` 의 근거입니다.
-
-- **정보검색 Recall@k / MRR / nDCG**
-  정보검색의 표준 검색 지표입니다.
-  `path_recall` 은 이를 KG 근거 경로에 적용한 형태입니다.
-
-표준 지표는 그대로 쓰고,
-표준이 없는 조합 지표(`path_recall` 경로 적용, `triple_coverage`, `non_isolated_node_ratio`)는
-이 프로젝트에서 정의한 지표임을 함수 docstring 에 적었습니다.
-
-## 로드맵
-
-- 출처 무결성에서 신선도(freshness)와 계보(lineage)까지 보는 메타데이터 검증기로 확장합니다.
-  (현재 `source_traceability` 가 출처 유무를 결정적으로 확인합니다.)
-- ALCE 방식의 답변 인용 평가(`citation_precision` / `citation_recall`)를 추가합니다.
-- 같은 두 노드 사이에 여러 관계를 두는 `MultiDiGraph` 지원과, 별칭·엔티티 링킹을 추가합니다.
-- 방해 문맥이 섞였을 때의 견고함을 보는 지표(`noise_sensitivity`)를 추가합니다.
+[CHANGELOG.md](CHANGELOG.md)
 
 ## 라이선스
 

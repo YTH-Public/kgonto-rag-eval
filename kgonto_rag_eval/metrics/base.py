@@ -17,3 +17,17 @@ class Metric(ABC):
 
     def _no_reference(self, sample: EvalSample) -> bool:
         return self.requires_reference and not sample.reference
+
+    def judge_error(self, message: str, **details) -> MetricResult:
+        """judge 출력이 규칙을 어겼을 때. 점수를 만들지 않고 오류로 남깁니다."""
+        return MetricResult(metric=self.name, score=None, verdict=None, reason=message,
+                            failed_component="judge", error=message, details=details)
+
+
+def check_counts(total: int, part: int, part_name: str = "supported") -> str | None:
+    """judge 가 낸 개수의 앞뒤가 맞는지. 문제가 있으면 이유 문자열, 없으면 None."""
+    if total < 0 or part < 0:
+        return f"개수가 음수입니다(total={total}, {part_name}={part})."
+    if part > total:
+        return f"{part_name}={part} 가 total={total} 보다 큽니다."
+    return None

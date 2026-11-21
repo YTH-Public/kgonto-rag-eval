@@ -5,12 +5,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from ..schema import EvalSample, MetricResult
-from .base import Metric
+from .base import Metric, check_counts
 
 
 class _RelevancyVerdict(BaseModel):
-    total_intents: int = Field(description="질문이 요구하는 의도/요구사항 수 (1~3)")
-    addressed_intents: int = Field(description="답변이 직접 다룬 의도 수")
+    total_intents: int = Field(ge=0, description="질문이 요구하는 의도/요구사항 수 (1~3)")
+    addressed_intents: int = Field(ge=0, description="답변이 직접 다룬 의도 수")
     verbosity_penalty: float = Field(ge=0, le=0.3, description="불필요한 장황함·범위 이탈 감점 0~0.3")
     reason: str = Field(description="한국어 1~2문장")
 
@@ -34,8 +34,11 @@ class AnswerRelevancy(Metric):
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=f"질문: {sample.user_input}\n\n답변:\n{sample.response}"),
         ])
-        addressed = min(v.addressed_intents, v.total_intents)   # addressed 는 total 을 넘을 수 없음
-        base = (addressed / v.total_intents) if v.total_intents else 0.0
+        problem = check_counts(v.total_intents, v.addressed_intents, "addressed")
+        if problem or v.total_intents == 0:
+            return self.judge_error(problem or "질문 의도 수가 0입니다.", raw=v.model_dump())
+        addressed = v.addressed_intents
+        base = addressed / v.total_intents
         score = round(max(0.0, min(1.0, base - max(0.0, v.verbosity_penalty))), 3)
         verdict = MetricResult.verdict_from_score(score)
         return MetricResult(

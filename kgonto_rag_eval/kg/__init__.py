@@ -10,7 +10,7 @@ from .graph_eval import (
     schema_violation_rate,
 )
 from .io import load_kg
-from .retrieval_eval import path_recall, path_triples, triple_coverage
+from .retrieval_eval import path_entity_recall, path_recall, path_triples, triple_coverage
 from .traceability import source_traceability
 
 __all__ = [
@@ -31,7 +31,9 @@ __all__ = [
     # 신규: 검색/근거/구조 결정적 지표 (L1~L2)
     "schema_violation_rate",
     "non_isolated_node_ratio",
+    "path_entity_recall",
     "path_recall",
+    "leakage_report",
     "triple_coverage",
     "path_triples",
     "source_traceability",
@@ -49,6 +51,7 @@ _LAZY_EXPORTS = {
     "to_eval_dataset": ("kgonto_rag_eval.kg.testset", "to_eval_dataset"),
     "save_jsonl": ("kgonto_rag_eval.kg.testset", "save_jsonl"),
     "load_jsonl": ("kgonto_rag_eval.kg.testset", "load_jsonl"),
+    "leakage_report": ("kgonto_rag_eval.kg.testset", "leakage_report"),
 }
 
 

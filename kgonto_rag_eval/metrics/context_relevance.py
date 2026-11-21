@@ -40,11 +40,14 @@ class ContextRelevance(Metric):
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=f"질문: {sample.user_input}\n\n검색 문맥:\n{sample.context_text}"),
         ])
-        labels = [it.label for it in sorted(v.items, key=lambda x: x.index)][:n]
-        # judge 가 일부 문맥만 판정하면 누락분이 분모에서 빠져 과대평가됨 -> 부족분은 irrelevant 로 채움
-        if len(labels) < n:
-            labels = labels + ["irrelevant"] * (n - len(labels))
-        score = round(sum(_LABEL_SCORE.get(l, 0.0) for l in labels) / n, 3)
+        indexes = sorted(it.index for it in v.items)
+        if indexes != list(range(1, n + 1)):   # 빠짐 · 중복 · 범위 밖은 어느 문맥 판정인지 알 수 없음
+            return self.judge_error(f"문맥 번호가 1..{n} 과 맞지 않습니다: {indexes}", raw=v.model_dump())
+        unknown = [it.label for it in v.items if it.label not in _LABEL_SCORE]
+        if unknown:
+            return self.judge_error(f"알 수 없는 라벨: {unknown}", raw=v.model_dump())
+        labels = [it.label for it in sorted(v.items, key=lambda x: x.index)]
+        score = round(sum(_LABEL_SCORE[label] for label in labels) / n, 3)
         verdict = MetricResult.verdict_from_score(score)
         return MetricResult(
             metric=self.name, score=score, verdict=verdict, reason=v.reason,

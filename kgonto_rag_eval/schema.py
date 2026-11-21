@@ -14,17 +14,27 @@ def _to_text(ctx: Any) -> str:
 
 
 class EvalSample(BaseModel):
-    """평가 한 건. retrieved_contexts 는 문자열/Document 모두 받아 문자열로 정규화."""
+    """평가 한 건.
+
+    sample_id: 기준선 비교 · 원인 추적용 안정 ID (없으면 evaluate 가 순번을 씁니다).
+    retrieved_contexts: **그때 실제로 검색된** 근거 목록. 문자열 / Document 리스트.
+        문자열 하나를 그대로 넣으면 글자 단위로 쪼개지므로 오류로 막습니다.
+    metadata: split · system_version 같은 부가 정보(점수에는 쓰지 않음).
+    """
+    sample_id: Optional[str] = None
     user_input: str
     retrieved_contexts: list[str] = Field(default_factory=list)
     response: str = ""
     reference: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
 
     @field_validator("retrieved_contexts", mode="before")
     @classmethod
     def _normalize_contexts(cls, v):
         if v is None:
             return []
+        if isinstance(v, (str, bytes)) or hasattr(v, "page_content"):
+            raise ValueError("retrieved_contexts 는 목록이어야 합니다. 조각 하나면 [텍스트] 로 넣으세요.")
         return [_to_text(c) for c in v]
 
     @property
@@ -34,12 +44,18 @@ class EvalSample(BaseModel):
 
 
 class MetricResult(BaseModel):
-    """지표 한 개의 채점 결과. (공통 스키마: score/verdict/reason/failed_component/details)"""
+    """지표 한 개의 채점 결과.
+
+    score: 0~1. 평가할 수 없으면(reference 없음 · judge 오류) None.
+    error: judge 출력이 규칙을 어겼거나 호출이 실패하면 그 이유. 이때 score 는 None 입니다
+        (오류를 낮은 품질 점수로 숨기지 않기 위해).
+    """
     metric: str
-    score: Optional[float] = None   # 0~1, 평가 불가(예: reference 없음)면 None
+    score: Optional[float] = None
     verdict: Optional[str] = None   # pass | partial | fail
     reason: str = ""
-    failed_component: Optional[str] = None   # retriever | generator | reference | judge_uncertain
+    failed_component: Optional[str] = None   # retriever | generator | reference | judge
+    error: Optional[str] = None
     details: dict = Field(default_factory=dict)
 
     @staticmethod
@@ -73,12 +89,18 @@ class EvaluationDataset(BaseModel):
 
 
 class EvalReport(BaseModel):
-    """평가 결과: 샘플별 점수 행 + 지표별 평균."""
+    """평가 결과.
+
+    rows: 샘플별 점수 행(입력 · 판정 세부 · 오류 포함).
+    summary: 지표별 평균(유효 점수만, 반올림).
+    stats: 지표별 {mean(반올림 전), valid, missing, errors} - 평균이 몇 건에서 나왔는지 함께 봅니다.
+    """
     rows: list[dict]
     summary: dict
+    stats: dict = Field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {"rows": self.rows, "summary": self.summary}
+        return {"rows": self.rows, "summary": self.summary, "stats": self.stats}
 
     def to_pandas(self):
         import pandas as pd  # pandas 는 선택 의존성

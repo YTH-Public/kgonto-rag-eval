@@ -5,6 +5,8 @@ import json
 import pathlib
 from typing import Any, Iterable, Optional
 
+from ._triples import iter_triples
+
 
 def _load_json(x: Any) -> list[dict]:
     if x is None:
@@ -19,28 +21,23 @@ def load_kg(
     relations: Any = None,
     triples: Optional[Iterable[tuple]] = None,
 ):
-    """지식그래프를 networkx DiGraph 로 만든다.
+    """지식그래프를 networkx MultiDiGraph 로 만든다.
 
     사용법 1 (JSON 포맷): load_kg(entities="entities.json", relations="relations.json")
       - entities: [{"name","type", ...속성}], relations: [{"source","relation","target"}]
-      - 파일경로 또는 list[dict] 모두 가능.
+        (subject / object 칸 이름도 받습니다)
     사용법 2 (트리플): load_kg(triples=[("삼성전자","HAS_DIVISION","DS부문"), ...])
 
+    같은 두 노드 사이에 관계가 여럿이어도 모두 남깁니다(엣지 key = 관계 이름).
     노드 속성(type 등)은 그대로 보존, 엣지에는 relation 속성을 단다.
     """
     import networkx as nx  # 선택 의존성
 
-    g = nx.DiGraph()
-    if triples is not None:
-        for s, rel, o in triples:
-            g.add_node(s)
-            g.add_node(o)
-            g.add_edge(s, o, relation=rel)
-        return g
-
-    for e in _load_json(entities):
-        name = e["name"]
-        g.add_node(name, **{k: v for k, v in e.items() if k != "name"})
-    for r in _load_json(relations):
-        g.add_edge(r["source"], r["target"], relation=r["relation"])
+    g = nx.MultiDiGraph()
+    if triples is None:
+        for e in _load_json(entities):
+            g.add_node(e["name"], **{k: v for k, v in e.items() if k != "name"})
+        triples = iter_triples(_load_json(relations))
+    for s, rel, o in iter_triples(triples):
+        g.add_edge(s, o, key=rel, relation=rel)
     return g

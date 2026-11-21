@@ -17,7 +17,7 @@ LLM-judge 로 RAG 답변을 평가합니다. 손으로 만든 작은 평가셋�
 ```bash
 uv pip install -e ./kgonto-rag-eval
 ```
-> `.env` 에 `OPENAI_API_KEY` 필요. 평가자(judge)는 기본 `gpt-5.4-mini`.
+> `.env` 에 `OPENAI_API_KEY` 필요. 평가자(judge)는 기본 `gpt-6-luna`.
 """),
 
     code('''from dotenv import load_dotenv
@@ -117,7 +117,7 @@ for r in report.rows:
 ## 정리
 
 - `EvaluationDataset.from_list` → `evaluate(ds, metrics=[...])` → `report.summary` / `report.rows`
-- 지표는 모두 0~1, LLM-judge(gpt-5.4-mini). reference 없으면 reference 필요 지표는 건너뜀
+- 지표는 모두 0~1, LLM-judge(기본 gpt-6-luna). reference 없으면 reference 필요 지표는 건너뜀
 - 점수는 절대값보다 **변경 전후 상대 비교**로 보세요. judge=피평가 동일 모델 한계가 있습니다
 - 지식그래프가 있다면 `kgonto_rag_eval.kg` 로 multi-hop 평가셋을 자동 생성할 수도 있습니다 (README 참고)
 """),

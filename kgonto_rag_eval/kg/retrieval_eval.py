@@ -4,15 +4,17 @@
 답변 점수(RAGAS 계열) 와 분리해, 검색 단계의 성공/실패를 먼저 드러내기 위한 지표입니다.
 
 지표와 근거:
-- path_recall: 정보검색의 Recall@k 표준을 KG 근거 경로(엔티티)에 적용한 형태입니다.
-- triple_coverage: RAGAS context recall(Es et al. 2024, arXiv:2309.15217)과 KG 트리플 recall 을
-  합친, 이 프로젝트에서 정의한 지표입니다(표준 단일 지표는 아닙니다).
+- path_entity_recall: 정답 경로의 **이름**이 검색 결과에 나타난 비율. 정보검색 Recall@k 를 경로 이름에 적용한,
+  이 프로젝트에서 정의한 지표입니다. 관계 · 방향은 보지 않습니다(방향이 틀린 트리플도 이름만 있으면 1.0).
+- triple_coverage: 정답 근거 트리플 중 검색 트리플이 덮은 비율. 관계 · 방향까지 봅니다.
+  RAGAS context recall(Es et al. 2024, arXiv:2309.15217)의 생각을 트리플에 옮긴, 이 프로젝트의 지표입니다.
 """
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, Optional
 
+from ._triples import as_triples
 
 _KOREAN_PARTICLES = frozenset("은는이가을를와과의에로도만")
 
@@ -33,6 +35,11 @@ def _entity_in_text(entity: str, text: str) -> bool:
     return False
 
 
+def _dict_text(r: dict) -> str:
+    parts = [r.get("source", r.get("subject", "")), r.get("relation", ""), r.get("target", r.get("object", ""))]
+    return " ".join(str(p) for p in parts if p) or str(r)
+
+
 def _as_text(retrieved: Any) -> str:
     """검색 결과를 하나의 텍스트로 합칩니다. 문자열/문자열리스트/Document리스트/트리플 모두 수용."""
     if retrieved is None:
@@ -42,7 +49,7 @@ def _as_text(retrieved: Any) -> str:
     if hasattr(retrieved, "page_content"):
         return str(retrieved.page_content)
     if isinstance(retrieved, dict):
-        return " ".join(str(retrieved.get(k, "")) for k in ("source", "relation", "target")) or str(retrieved)
+        return _dict_text(retrieved)
     if isinstance(retrieved, (tuple, list)) and len(retrieved) == 3 and not any(isinstance(x, (tuple, list, dict)) for x in retrieved):
         return f"{retrieved[0]} {retrieved[1]} {retrieved[2]}"
     parts: list[str] = []
@@ -54,20 +61,10 @@ def _as_text(retrieved: Any) -> str:
         elif isinstance(r, (tuple, list)) and len(r) == 3:
             parts.append(f"{r[0]} {r[1]} {r[2]}")
         elif isinstance(r, dict):
-            parts.append(" ".join(str(r.get(k, "")) for k in ("source", "relation", "target")) or str(r))
+            parts.append(_dict_text(r))
         else:
             parts.append(str(r))
     return "\n".join(parts)
-
-
-def _triples(x: Any) -> set[tuple]:
-    out: set[tuple] = set()
-    for r in x or []:
-        if isinstance(r, dict):
-            out.add((r["source"], r["relation"], r["target"]))
-        elif isinstance(r, (tuple, list)) and len(r) == 3:
-            out.add(tuple(r))
-    return out
 
 
 def path_triples(evidence_path: list[str], evidence_relations: list[str]) -> list[tuple]:
@@ -76,15 +73,12 @@ def path_triples(evidence_path: list[str], evidence_relations: list[str]) -> lis
             for i in range(len(evidence_relations))]
 
 
-def path_recall(reference_entities: Iterable[str], retrieved: Any) -> dict:
-    """정답 근거 경로의 엔티티 중 검색 결과에 나타난 비율입니다.
+def path_entity_recall(reference_entities: Iterable[str], retrieved: Any) -> dict:
+    """정답 근거 경로의 엔티티 이름 중 검색 결과에 나타난 비율입니다.
 
     reference_entities: 정답 근거 경로의 노드 이름들 (예: TestItem.evidence_path).
-    retrieved: 검색 결과. 텍스트 / 문자열 리스트 / langchain Document 리스트 / (s,rel,o) 트리플 모두 가능합니다.
-        벡터 RAG(텍스트)와 그래프 RAG(트리플)에 같은 기준으로 적용해 baseline 비교가 됩니다.
-
-    근거: 정보검색의 Recall@k 표준을 KG 근거 경로에 적용한 형태입니다
-    (Recall@k 자체는 IR 표준 지표, 경로 적용은 이 프로젝트에서 정의했습니다).
+    retrieved: 텍스트 / 문자열 리스트 / Document 리스트 / 트리플. 벡터 RAG 와 그래프 RAG 에 같은 기준을 씁니다.
+    주의: 이름만 봅니다. 관계 · 방향이 맞는지는 triple_coverage 로 따로 보세요.
     """
     refs = [g for g in reference_entities if g]
     text = _as_text(retrieved)
@@ -92,21 +86,24 @@ def path_recall(reference_entities: Iterable[str], retrieved: Any) -> dict:
     recall = len(found) / len(refs) if refs else 0.0
     return {
         "path_recall": round(recall, 3),
+        "path_entity_recall": round(recall, 3),
         "found": found,
         "missing": [g for g in refs if g not in found],
         "reference_total": len(refs),
     }
 
 
-def triple_coverage(reference_triples: Iterable, retrieved_triples: Iterable) -> dict:
-    """정답 근거 트리플 중 검색 결과 트리플이 덮은 비율입니다 (트리플 단위 recall).
+path_recall = path_entity_recall   # v0.1 이름(호환용). 새 코드는 path_entity_recall 을 쓰세요.
 
-    트리플을 돌려주는 검색기(그래프/하이브리드)용입니다. 검색이 텍스트만 주면 path_recall 을 쓰세요.
 
-    근거: RAGAS context recall(Es et al. 2024, arXiv:2309.15217)과 KG 트리플 recall 을
-    합친, 이 프로젝트에서 정의한 지표입니다(표준 단일 지표는 아닙니다).
+def triple_coverage(reference_triples: Iterable, retrieved_triples: Iterable,
+                    normalize: Optional[Callable[[str], str]] = None) -> dict:
+    """정답 근거 트리플 중 검색 결과 트리플이 덮은 비율입니다 (트리플 단위 recall, 방향 포함).
+
+    normalize: 주어 · 목적어 이름 정리 함수(양쪽에 같이 적용).
+    대체 경로가 여럿인 질문은 정답 트리플 묶음마다 따로 재고 가장 높은 값을 쓰세요.
     """
-    refs, ret = _triples(reference_triples), _triples(retrieved_triples)
+    refs, ret = as_triples(reference_triples, normalize), as_triples(retrieved_triples, normalize)
     covered = refs & ret
     cov = len(covered) / len(refs) if refs else 0.0
     return {

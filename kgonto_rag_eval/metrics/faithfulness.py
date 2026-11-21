@@ -5,12 +5,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from ..schema import EvalSample, MetricResult
-from .base import Metric
+from .base import Metric, check_counts
 
 
 class _FaithVerdict(BaseModel):
-    total_claims: int = Field(description="답변에 담긴 사실 주장의 총 개수")
-    supported_claims: int = Field(description="검색 문맥이 뒷받침하는 주장 개수")
+    total_claims: int = Field(ge=0, description="답변에 담긴 사실 주장의 총 개수")
+    supported_claims: int = Field(ge=0, description="검색 문맥이 뒷받침하는 주장 개수")
     unsupported: list[str] = Field(default_factory=list, description="문맥에 근거가 없는 주장 목록")
     reason: str = Field(description="한국어 2~3문장 근거")
 
@@ -35,7 +35,10 @@ class Faithfulness(Metric):
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=f"참고 문맥:\n{sample.context_text}\n\n답변:\n{sample.response}"),
         ])
-        supported = min(v.supported_claims, v.total_claims)   # supported 는 total 을 넘을 수 없음
+        problem = check_counts(v.total_claims, v.supported_claims)
+        if problem:   # 앞뒤가 안 맞는 판정은 점수로 바꾸지 않음
+            return self.judge_error(problem, raw=v.model_dump())
+        supported = v.supported_claims
         score = (supported / v.total_claims) if v.total_claims else 0.0
         score = round(max(0.0, min(1.0, score)), 3)
         verdict = MetricResult.verdict_from_score(score)

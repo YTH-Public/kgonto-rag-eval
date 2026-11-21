@@ -50,26 +50,34 @@ class TestItem(BaseModel):
 
 
 def enumerate_paths(graph, min_hops: int = 1, max_hops: int = 3) -> list[PathEvidence]:
-    """방향 단순 경로(cycle 없음) 후보를 hop 길이별로 모은다."""
+    """방향 단순 경로(같은 노드를 두 번 지나지 않음) 후보를 hop 길이별로 모은다.
+
+    같은 두 노드 사이에 관계가 여럿이면(MultiDiGraph) 관계마다 다른 경로로 셉니다.
+    """
     import networkx as nx
 
     seen = set()
     out: list[PathEvidence] = []
     nodes = list(graph.nodes)
+    multi = graph.is_multigraph()
     for src in nodes:
         for tgt in nodes:
             if src == tgt:
                 continue
-            for p in nx.all_simple_paths(graph, src, tgt, cutoff=max_hops):
-                hops = len(p) - 1
+            for edges in nx.all_simple_edge_paths(graph, src, tgt, cutoff=max_hops):
+                hops = len(edges)
                 if hops < min_hops:
                     continue
-                key = tuple(p)
+                path_nodes = [edges[0][0]] + [e[1] for e in edges]
+                if multi:
+                    rels = [graph.edges[e]["relation"] for e in edges]
+                else:
+                    rels = [graph[u][v]["relation"] for u, v in edges]
+                key = (tuple(path_nodes), tuple(rels))
                 if key in seen:
                     continue
                 seen.add(key)
-                rels = [graph[p[i]][p[i + 1]]["relation"] for i in range(hops)]
-                out.append(PathEvidence(nodes=p, relations=rels))
+                out.append(PathEvidence(nodes=path_nodes, relations=rels))
     return out
 
 
@@ -145,6 +153,8 @@ def validate_item(item: TestItem) -> list[str]:
 
     multi-hop 가짜(첫/끝 엣지만으로 답해지는 경우)를 거르려고, 경로의 **중간 노드**가
     질문이나 정답에 실제로 쓰였는지 본다(중간 노드가 답에 필요한지의 휴리스틱).
+    한계: 이름이 문장에 있다고 진짜 multi-hop 이라는 보장은 아닙니다. 핵심 엣지 하나를 가려도
+    답할 수 있는지는 사람이 확인하세요. 통과해도 review_status 는 pending 그대로입니다.
     """
     issues = []
     if "?" not in item.question:
@@ -169,23 +179,55 @@ def validate_item(item: TestItem) -> list[str]:
     return issues
 
 
-def to_eval_dataset(items: list[TestItem], rag_fn):
-    """검수된 TestItem 들에 RAG 를 실행해 평가용 EvaluationDataset 으로.
+def to_eval_dataset(items: list[TestItem], rag_fn, allow_status=("keep", "edit")):
+    """사람이 검수해 승인한 TestItem 에만 RAG 를 실행해 평가용 EvaluationDataset 으로.
 
     rag_fn(question) -> (answer: str, contexts: list[str] | list[Document]).
+        contexts 는 **그때 실제로 검색된** 근거여야 합니다(정답 쪽을 나중에 붙이지 마세요).
+    allow_status: 실행할 review_status. 기본은 keep · edit 만(pending · drop 은 건너뜀).
+        edit 은 고친 뒤 다시 확인했다는 뜻으로 씁니다.
     """
     from ..schema import EvaluationDataset
 
+    allowed = set(allow_status)
     rows = []
     for it in items:
+        if it.review_status not in allowed:
+            continue
         answer, contexts = rag_fn(it.question)
         rows.append({
+            "sample_id": it.id,
             "user_input": it.question,
-            "retrieved_contexts": contexts,
+            "retrieved_contexts": list(contexts),
             "response": answer,
             "reference": it.reference,
+            "metadata": {"split": it.split, "query_type": it.query_type, "answerable": it.answerable},
         })
     return EvaluationDataset.from_list(rows)
+
+
+def leakage_report(items: list[TestItem], split_of=lambda it: it.split) -> dict:
+    """평가셋 누수 점검 두 가지(결정적).
+
+    answer_in_question: 정답 엔티티(경로의 출발 노드 제외)가 질문에 그대로 들어 있는 문항.
+        질문만 보고 답을 알 수 있으면 검색 평가가 부풀려집니다.
+    split_overlap: 같은 근거 경로가 서로 다른 split 에 들어간 경우.
+    세 번째 누수(평가셋을 만든 KG 와 채점 정답이 같은 KG 라 순환하는 문제)는 코드로 잡을 수 없어 사람이 확인합니다.
+    """
+    in_question = []
+    for it in items:
+        if not it.answerable:
+            continue
+        start = it.evidence_path[0] if it.evidence_path else None
+        leaked = [e for e in it.expected_entities if e != start and e and e in it.question]
+        if leaked:
+            in_question.append({"id": it.id, "leaked": leaked})
+    by_path: dict = {}
+    for it in items:
+        if it.evidence_path:
+            by_path.setdefault(tuple(it.evidence_path), set()).add(split_of(it))
+    overlap = [list(p) for p, splits in by_path.items() if len(splits) > 1]
+    return {"answer_in_question": in_question, "split_overlap": overlap}
 
 
 def save_jsonl(items: list[TestItem], path) -> None:

@@ -5,19 +5,19 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from ..schema import EvalSample, MetricResult
-from .base import Metric
+from .base import Metric, check_counts
 
 
 class _RecallVerdict(BaseModel):
-    total_claims: int = Field(description="기준 정답을 답하는 데 필수인 핵심 주장 수")
-    supported_claims: int = Field(description="검색 문맥에서 근거를 찾을 수 있는 주장 수")
+    total_claims: int = Field(ge=0, description="기준 정답을 답하는 데 필수인 핵심 주장 수")
+    supported_claims: int = Field(ge=0, description="검색 문맥에서 근거를 찾을 수 있는 주장 수")
     missing: list[str] = Field(default_factory=list, description="문맥에서 근거를 못 찾은 핵심 주장")
     reason: str = Field(description="한국어 1~2문장")
 
 
 _SYSTEM = """당신은 RAG context recall 평가자입니다. 생성된 답변은 보지 않습니다.
 기준 정답(reference)을 핵심 주장 단위로 나누고, 각 주장이 '검색 문맥'에서 근거를 찾을 수 있는지 판단합니다.
-- 질문에 답하는 데 필수인 주장만 셉니다.
+- 질문에 답하는 데 필수인 주장만 셉니다. 질문의 조건을 되풀이한 부분은 주장으로 세지 않습니다.
 - total_claims: 핵심 주장 총수. supported_claims: 문맥이 뒷받침하는 수. supported 는 total 을 넘지 않습니다.
 - 애매하면 근거 있다고 보지 마세요."""
 
@@ -35,9 +35,14 @@ class ContextRecall(Metric):
                                 failed_component="retriever")
         v = llm.with_structured_output(_RecallVerdict).invoke([
             SystemMessage(content=_SYSTEM),
-            HumanMessage(content=f"기준 정답:\n{sample.reference}\n\n검색 문맥:\n{sample.context_text}"),
+            HumanMessage(content=(
+                f"질문: {sample.user_input}\n\n기준 정답:\n{sample.reference}\n\n검색 문맥:\n{sample.context_text}"
+            )),
         ])
-        supported = min(v.supported_claims, v.total_claims)
+        problem = check_counts(v.total_claims, v.supported_claims)
+        if problem:   # 앞뒤가 안 맞는 판정은 점수로 바꾸지 않음
+            return self.judge_error(problem, raw=v.model_dump())
+        supported = v.supported_claims
         score = (supported / v.total_claims) if v.total_claims else 0.0
         score = round(max(0.0, min(1.0, score)), 3)
         verdict = MetricResult.verdict_from_score(score)
