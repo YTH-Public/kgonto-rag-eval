@@ -5,6 +5,7 @@
 잘못된 점수가 나오던 곳부터 고쳤습니다.
 
 ### 고친 것
+- `citation_support`: precision 은 결합 판정이 True 일 때만 출처의 쓸모를 셈(ALCE 와 같게), 문장의 모든 판정 실패를 오류로 남김, 원 논문 분모의 `citation_recall_all` 추가
 - `EvalSample.retrieved_contexts` 에 문자열 하나를 넣으면 글자 단위로 쪼개지던 문제 → 오류로 막음.
 - judge 개수가 음수이거나 부분 > 전체여도 1.0 이 되던 문제(Faithfulness · ContextRecall · AnswerRelevancy) → `error` 로 남기고 점수 없음.
 - ContextRelevance 가 같은 번호를 두 번 판정해도 1.0 이 되던 문제, ContextPrecision 이 개수가 모자라면 무관으로 채우던 문제 → judge 오류.

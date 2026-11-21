@@ -9,8 +9,11 @@
 3 은 ALCE(Gao et al. 2023, arXiv:2305.14627)의 citation recall / precision 아이디어를
 수업용으로 줄인 지표입니다. 원 논문은 NLI 모델(AutoAIS)로 판정하지만, 여기서는 LLM 판정을 씁니다.
 - citation_recall: 출처를 단 문장 중, 단 출처들을 합쳐 그 문장을 뒷받침하는 비율
-- citation_precision: 단 출처 중, 혼자서 뒷받침하거나 빼면 뒷받침이 깨지는 출처의 비율
-- 출처가 없는 문장은 recall 분모에서 빼고 uncited 로 따로 셉니다(필요하면 직접 분모에 넣으세요).
+- citation_precision: 단 출처 중 쓸모 있는 출처의 비율. 원 논문처럼 **출처들을 합쳐 문장을 뒷받침할 때만**
+  (결합 판정 True) 그 출처를 쓸모 있다고 봅니다 - 혼자서 뒷받침하거나, 빼면 뒷받침이 깨지는 출처.
+- 원 논문과 다른 점: 출처가 없는 문장은 recall 분모에서 빼고 uncited 로 따로 셉니다(원 논문은 0 으로 넣음).
+  원 논문 방식이 필요하면 citation_recall_all(출처 없는 문장을 0 으로 넣은 값)을 쓰세요.
+- 문장 하나의 판정 가운데 하나라도 실패하면 그 문장은 오류(errors)로 남기고 점수에서 뺍니다.
 """
 from __future__ import annotations
 
@@ -100,35 +103,36 @@ def citation_support(answer: str, corpus: dict, llm, question: Optional[str] = N
         if not ids:
             rows.append({**item, "supported": None, "good_citations": []})
             continue
-        texts = [keys[c] for c in ids if c in keys]
-        try:
+        try:   # 문장 하나의 판정(결합 · 혼자 · 나머지)을 모두 감쌈 - 실패는 0점이 아니라 오류
+            texts = [keys[c] for c in ids if c in keys]
             joint = bool(texts) and _supports(llm, item["sentence"], texts, question)
-        except Exception as e:   # 판정 실패는 0점이 아니라 오류로 남김
+            good: list[str] = []
+            if joint:   # 원 논문: 결합 판정이 True 일 때만 출처의 쓸모를 셈
+                for c in ids:
+                    if c not in keys:
+                        continue
+                    if len(ids) == 1:
+                        good.append(c)
+                        continue
+                    alone = _supports(llm, item["sentence"], [keys[c]], question)
+                    rest = [keys[o] for o in ids if o != c and o in keys]
+                    if alone or not (rest and _supports(llm, item["sentence"], rest, question)):
+                        good.append(c)
+        except Exception as e:
             rows.append({**item, "supported": None, "good_citations": [], "error": f"{type(e).__name__}: {e}"})
             continue
-        good: list[str] = []
-        for c in ids:
-            if c not in keys:
-                continue
-            if len(ids) == 1:
-                ok = joint
-            else:
-                alone = _supports(llm, item["sentence"], [keys[c]], question)
-                rest = [keys[o] for o in ids if o != c and o in keys]
-                # 혼자 뒷받침하면 좋은 출처. 아니면 빼 봤을 때 뒷받침이 깨지는지(필요한 출처인지) 봅니다.
-                ok = alone or (joint and not (rest and _supports(llm, item["sentence"], rest, question)))
-            if ok:
-                good.append(c)
         n_cited += 1
         n_supported += int(joint)
         n_cites += len(ids)
         n_good += len(good)
         rows.append({**item, "supported": joint, "good_citations": good})
+    uncited = sum(1 for r in rows if r["supported"] is None and not r.get("error"))
     return {
         "citation_recall": round(n_supported / n_cited, 3) if n_cited else None,
+        "citation_recall_all": round(n_supported / (n_cited + uncited), 3) if (n_cited + uncited) else None,
         "citation_precision": round(n_good / n_cites, 3) if n_cites else None,
         "cited_sentences": n_cited,
-        "uncited": sum(1 for r in rows if r["supported"] is None and not r.get("error")),
+        "uncited": uncited,
         "errors": sum(1 for r in rows if r.get("error")),
         "sentences": rows,
     }

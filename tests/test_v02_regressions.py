@@ -116,3 +116,39 @@ def test_to_eval_dataset_skips_failed_validation():
 def test_pairwise_keeps_first_result_on_error():
     r = pairwise_judge("q", "a", "b", FakeLLM([{"reason": "A 가 정확", "winner": "1"}, RuntimeError("boom")]))
     assert r["final"] == "error" and r["ab"] == "A" and r["ab_reason"] == "A 가 정확"
+
+
+class _Seq:
+    """판정 결과를 순서대로 돌려주는 가짜 모델 (예외 객체면 던짐)"""
+    def __init__(self, answers):
+        self.answers = list(answers)
+
+    def with_structured_output(self, schema):
+        outer = self
+
+        class _R:
+            def invoke(self, messages):
+                a = outer.answers.pop(0)
+                if isinstance(a, Exception):
+                    raise a
+                return schema(supported=a, reason="x")
+        return _R()
+
+
+def test_citation_precision_needs_joint_support():
+    # 결합 판정 False 면 혼자 판정이 True 여도 쓸모 있는 출처로 세지 않음 (ALCE)
+    llm = _Seq([False, True, True])
+    r = citation_support("월 20만 원입니다 [p.1][p.2].", {1: "a", 2: "b"}, llm)
+    assert r["citation_recall"] == 0.0 and r["citation_precision"] == 0.0
+
+
+def test_citation_error_in_alone_check_is_recorded():
+    llm = _Seq([True, RuntimeError("judge failed")])
+    r = citation_support("월 20만 원입니다 [p.1][p.2].", {1: "a", 2: "b"}, llm)
+    assert r["errors"] == 1 and r["citation_recall"] is None
+
+
+def test_citation_recall_all_counts_uncited():
+    llm = _Seq([True])
+    r = citation_support("월 20만 원입니다 [p.1]. 출처 없는 문장입니다.", {1: "a"}, llm)
+    assert r["citation_recall"] == 1.0 and r["citation_recall_all"] == 0.5 and r["uncited"] == 1
