@@ -44,7 +44,7 @@ class ContextRecall(Metric):
             return self.judge_error(problem, raw=v.model_dump())
         supported = v.supported_claims
         score = (supported / v.total_claims) if v.total_claims else 0.0
-        score = round(max(0.0, min(1.0, score)), 3)
+        score = max(0.0, min(1.0, score))   # 반올림하지 않음
         verdict = MetricResult.verdict_from_score(score)
         return MetricResult(
             metric=self.name, score=score, verdict=verdict, reason=v.reason,

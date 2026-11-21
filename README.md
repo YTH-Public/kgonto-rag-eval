@@ -93,12 +93,15 @@ report.to_pandas()      # 행마다 점수 · 판정 세부(__details) · 오류
 
 | 지표 | RAGAS 논문(2309.15217) | RAGAS 0.4.4 | DeepEval 4.3.4 | 이 패키지 |
 |---|---|---|---|---|
-| Faithfulness | 답의 주장 중 문맥에서 추론되는 비율 | 같은 방식(주장 나누기 → 판정) | 모순만 깎음(기본 `penalize_ambiguous_claims=False` 라 애매한 주장은 통과) | 주장 지원 비율, 근거 없는 주장 목록 |
-| Answer relevancy | 답에서 질문을 거꾸로 만들어 원질문과 임베딩 유사도 | 같은 방식(코사인이라 척도가 낮게 나올 수 있음) | 답의 문장 중 질문과 관련된 비율 | 질문 의도 중 다룬 비율 - 장황함 감점(임베딩 안 씀) |
-| Context relevance | 문맥에서 필요한 문장 비율 | 두 판정 프롬프트의 0 · 1 · 2 등급 평균 | (Contextual Relevancy) 문맥 문장 중 관련 비율 | 문맥 조각마다 3단계 판정 평균 |
-| Context precision | (논문에 없음) | reference 있는 판 `ContextPrecision`, 없는 판 `ContextUtilization` | reference 사용 | reference 없이 average precision |
-| Context recall | (논문에 없음) | 정답 주장 중 문맥에서 찾은 비율 | 비슷 | 비슷, 질문을 함께 줌 |
-| Answer correctness | (논문에 없음) | 사실 F1 + 의미 유사도 가중합 | G-Eval 등으로 직접 정의 | 사실 F1 0.6 + 의미 적합도 0.4 |
+| Faithfulness | 답의 주장 중 문맥에서 추론되는 비율 | 같은 방식(주장 나누기 → 판정) | 주장마다 YES / BORDERLINE / NO 판정. 기본 `penalize_ambiguous_claims=False` 라 BORDERLINE 도 통과(근거에 없지만 모순도 아닌 주장이 통과할 수 있음), True 면 YES 만 | 주장 지원 비율, 근거 없는 주장 목록 |
+| Answer relevancy | 답에서 질문을 거꾸로 만들어 원질문과 임베딩 유사도 | 같은 방식(코사인 평균, 모든 질문이 얼버무림이면 0. 척도가 낮게 나올 수 있음) | 답에서 뽑은 statement 판정 중 YES + BORDERLINE 비율 | 질문 의도 중 다룬 비율 - 장황함 감점(임베딩 안 씀) |
+| Context relevance | 문맥에서 필요한 문장 비율 | 두 판정 프롬프트가 낸 0 · 1 · 2 등급을 각각 2로 나눠 평균(0 ~ 1) | (Contextual Relevancy) 모든 문맥 조각의 statement 판정을 펼친 YES 비율 | 문맥 조각마다 3단계 판정 평균 |
+| Context precision | (논문에 없음) | reference 있는 판 `ContextPrecision`, 없는 판 `ContextUtilization`(생성된 답을 참고) | 질문 + 기대 답으로 조각마다 유용성을 판정해 만든 average precision | 질문만으로 관련 표시를 만든 average precision |
+| Context recall | (논문에 없음) | 정답의 statement 중 문맥에 근거가 있는 비율 | 기대 답의 지원 판정 YES 비율 | 정답 주장 중 근거가 있는 비율, 질문을 함께 줌 |
+| Answer correctness | (논문에 없음) | 사실 F-score 0.75 + 의미 유사도 0.25(기본) | G-Eval 등으로 직접 정의 | 사실 P/R 의 F1 0.6 + 의미 적합도 0.4 |
+
+DeepEval 은 `eval_mode` 에 따라 판정 경로가 달라지므로 비교할 때는 `eval_mode="llm"` 으로 고정하세요.
+빈 입력 처리도 도구마다 다릅니다(NaN · 0 · 1). 비교 표에는 결측 · 빈 주장 · 호출 실패를 따로 적으세요.
 
 ## 지식그래프 기반 평가셋 만들기
 
@@ -172,7 +175,11 @@ citation_support(answer, corpus, judge, question="...")  # ③ 그 문장을 출
 
 세 검사는 서로 다릅니다. 같은 쪽에 숫자가 있어도 다른 대상에 대한 숫자일 수 있습니다.
 `citation_support` 는 ALCE(Gao et al. 2023, arXiv:2305.14627)의 citation recall / precision 아이디어를
-LLM 판정으로 줄인 **수업용 지표**입니다(원 논문은 NLI 모델로 판정).
+줄인 **수업용 지표**입니다. 원 논문과 다른 점:
+- 판정을 NLI 모델(AutoAIS) 대신 LLM 이 합니다.
+- recall 분모는 **출처를 단 문장**만입니다(ALCE 는 출처 없는 문장도 0 으로 세어 전체 문장을 분모로 씀). 출처 없는 문장 수는 `uncited` 로 따로 봅니다.
+- 풀리지 않는 ID 는 빼고 나머지 출처로 판정합니다. precision 분모는 출처 표시 횟수입니다.
+- 판정 호출이 실패한 문장은 0 점이 아니라 `errors` 로 셉니다.
 
 ## 두 답 비교 (pairwise)
 
@@ -193,7 +200,9 @@ result = compare_baseline(new_report, "baseline.json", tolerance=0.1)
 assert result["ok"], result
 ```
 
-같은 `sample_id` 끼리, 양쪽 모두 점수가 있는 행만 짝지어 평균을 비교합니다. 원점수(반올림 전)를 저장합니다.
+같은 `sample_id` 끼리, 양쪽 모두 점수가 있는 행만 짝지어 평균을 비교합니다. 지표 점수는 반올림하지 않은 값이라 작은 퇴행도 보입니다.
+기준선에서 점수가 있던 칸이 지금 비면(judge 실패 · 행 누락) `lost` 에 적히고 기본으로 실패합니다(`allow_missing=True` 로 풀 수 있음).
+`sample_id` 가 겹치면 저장하지 않습니다.
 LLM 판정은 실행마다 흔들리므로 허용 폭(`tolerance`)과 반복 횟수를 정해 두세요.
 CI 에서는 API 없이 도는 테스트(`tests/test_*.py`)만 돌리고, 실호출 테스트(`tests/live/`)는 따로 실행합니다.
 
@@ -214,6 +223,14 @@ CI 에서는 API 없이 도는 테스트(`tests/test_*.py`)만 돌리고, 실호
 - **KG 구축 P/R/F1** - Mondal et al., *End-to-End NLP Knowledge Graph Construction*. [arXiv:2106.01167](https://arxiv.org/abs/2106.01167) - `compare_kg`
 - **W3C SHACL** - [w3.org/TR/shacl](https://www.w3.org/TR/shacl/) - 스키마 검사의 동기
 - **GraphRAG-Bench** - [arXiv:2506.02404](https://arxiv.org/abs/2506.02404) - 구축 · 검색 · 생성을 나눠 보는 관점
+
+## v0.1 에서 옮겨 올 때
+
+- `load_kg` 는 MultiDiGraph 를 돌려줍니다. `g[u][v]["relation"]` 대신 `for u, v, rel in g.edges(keys=True)` 처럼 관계를 모두 읽으세요.
+- `EvalSample.retrieved_contexts` 에 문자열 하나를 주면 오류입니다. `[텍스트]` 로 넣으세요.
+- 지표 점수가 반올림되지 않습니다. 표시용은 `report.summary` 를 쓰세요.
+- `compare_kg(..., scope=...)` 에서 범위 칸이 빈 행은 오류입니다.
+- 사업보고서 정답처럼 `@제출회사` 치환 · 블록 범위 · 부분 정답(`partial`)이 있는 자료는 이 함수 앞에서 직접 전처리하세요(패키지가 해 주지 않음).
 
 ## 변경 기록
 

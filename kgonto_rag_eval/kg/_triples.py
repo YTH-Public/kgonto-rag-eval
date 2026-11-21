@@ -27,9 +27,12 @@ def as_triples(
     out: set[tuple] = set()
     for r in x or []:
         if isinstance(r, dict):
-            s = _pick(r, "source", "subject")
-            o = _pick(r, "target", "object")
-            key = tuple(r.get(k) for k in scope) + (norm(s), r["relation"], norm(o))
+            s = _pick(r, "subject", "source") if "subject" in r else _pick(r, "source")   # subject 가 있으면 그쪽이 주어
+            o = _pick(r, "object", "target") if "object" in r else _pick(r, "target")
+            missing = [k for k in scope if r.get(k) in (None, "")]
+            if missing:   # 범위 칸이 없으면 다른 문서와 섞이므로 비교하지 않음
+                raise ValueError(f"scope 칸 {missing} 이 비어 있습니다: {r}")
+            key = tuple(r[k] for k in scope) + (norm(s), r["relation"], norm(o))
         else:
             s, rel, o = r
             if scope:
@@ -44,7 +47,9 @@ def iter_triples(x: Iterable) -> list[tuple]:
     out = []
     for r in x or []:
         if isinstance(r, dict):
-            out.append((_pick(r, "source", "subject"), r["relation"], _pick(r, "target", "object")))
+            s = r["subject"] if "subject" in r else _pick(r, "source")
+            o = r["object"] if "object" in r else _pick(r, "target")
+            out.append((s, r["relation"], o))
         else:
             s, rel, o = r
             out.append((s, rel, o))

@@ -39,7 +39,7 @@ class AnswerRelevancy(Metric):
             return self.judge_error(problem or "질문 의도 수가 0입니다.", raw=v.model_dump())
         addressed = v.addressed_intents
         base = addressed / v.total_intents
-        score = round(max(0.0, min(1.0, base - max(0.0, v.verbosity_penalty))), 3)
+        score = max(0.0, min(1.0, base - max(0.0, v.verbosity_penalty)))   # 반올림하지 않음
         verdict = MetricResult.verdict_from_score(score)
         return MetricResult(
             metric=self.name, score=score, verdict=verdict, reason=v.reason,

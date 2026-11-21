@@ -77,7 +77,7 @@ def test_context_precision_length_mismatch_is_error():
 def test_context_precision_rank_score():
     res = ContextPrecision().score(_sample(retrieved_contexts=["a", "b", "c"]),
                                    FakeLLM([{"relevant_flags": [True, False, True], "reason": "x"}]))
-    assert res.score == round((1 / 1 + 2 / 3) / 2, 3)
+    assert res.score == pytest.approx((1 / 1 + 2 / 3) / 2)   # 반올림하지 않은 원점수
 
 
 def test_evaluate_keeps_ids_and_details():
@@ -156,7 +156,7 @@ def test_leakage_report():
 # 인용: 세 검사를 따로
 def test_citation_helpers():
     parts = split_cited_sentences("월 20만 원입니다 [p.35]. 최장 24개월입니다. [p.36]")
-    assert parts == [{"sentence": "월 20만 원입니다 .", "citations": ["35"]},
+    assert parts == [{"sentence": "월 20만 원입니다.", "citations": ["35"]},
                      {"sentence": "최장 24개월입니다.", "citations": ["36"]}]
     assert resolve_citations(["35", 99], {35: "x"})["missing"] == ["99"]
     assert quote_in_source("월 20만\n원", "청년 월세는 월 20만 원 지원") is True

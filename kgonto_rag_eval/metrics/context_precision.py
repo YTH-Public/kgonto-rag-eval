@@ -57,7 +57,7 @@ class ContextPrecision(Metric):
         flags = list(v.relevant_flags)
         if len(flags) != n:   # 개수가 다르면 어느 문맥의 판정인지 알 수 없음
             return self.judge_error(f"판정 {len(flags)}개, 문맥 {n}개로 개수가 다릅니다.", raw=v.model_dump())
-        score = round(_average_precision(flags), 3)
+        score = _average_precision(flags)   # 반올림하지 않음
         verdict = MetricResult.verdict_from_score(score)
         return MetricResult(
             metric=self.name, score=score, verdict=verdict, reason=v.reason,

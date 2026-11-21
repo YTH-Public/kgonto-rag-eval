@@ -14,6 +14,14 @@
 - `to_eval_dataset` 이 drop · pending 문항도 실행하던 문제 → 기본은 keep · edit 만.
 - `ContextRecall` 에 질문을 함께 줌(질문 조건을 되풀이한 정답 부분을 주장으로 세지 않게).
 
+- 지표 점수를 반올림하지 않음(기준선이 작은 퇴행을 놓치던 문제). 표시용 summary 만 반올림.
+- 기준선: judge 실패 · 행 누락으로 비는 칸이 있으면 실패(`lost`), `sample_id` 중복 · 빈 지표는 오류.
+- 인용: 마침표 뒤에 붙은 출처가 다음 문장으로 넘어가던 문제, 공백뿐인 인용이 일치로 나오던 문제, 판정 실패를 0점으로 세던 문제.
+- `compare_kg(scope=...)` 에서 범위 칸이 빈 행은 오류(문서가 섞이던 문제). subject 칸이 있으면 source 칸보다 우선.
+- `to_eval_dataset` 이 승인된 문항도 자동 검사를 하고, 근거를 문자열 하나로 주면 막음.
+- `evaluate`: 오류 개수가 `keep_details=False` 에서도 맞게 세짐, 근거 원문(`retrieved_contexts`)과 `idx` 열을 행에 남김.
+- `pairwise_judge`: 두 순서의 이유를 남기고, 한쪽 호출이 실패하면 `final="error"` 와 남은 결과를 돌려줌.
+
 ### 더한 것
 - `evaluate`: 행에 `sample_id` · 입력 · `metadata` · 판정 세부 · 오류, `report.stats`(유효 · 누락 · 오류 개수). judge 호출 실패에도 멈추지 않음.
 - `compare_kg` · `triple_coverage`: `normalize`, `scope`(문서 범위), subject/object 칸 이름.

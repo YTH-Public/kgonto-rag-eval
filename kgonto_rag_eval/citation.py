@@ -33,11 +33,14 @@ def split_cited_sentences(answer: str, pattern: str = DEFAULT_PATTERN) -> list[d
     반환: [{"sentence": 출처 표시를 뺀 문장, "citations": [ID, ...]}]
     출처 표시가 문장 끝 마침표 뒤에 붙어도 앞 문장의 것으로 봅니다.
     """
-    pieces = re.split(r"(?<=[.!?。])\s+|\n+", answer.strip())
+    cite = re.sub(r"\((?!\?)", "(?:", pattern)             # 묶음 없는 판 (옮기기용)
+    # 마침표 뒤에 붙은 출처를 마침표 앞으로 옮긴다: "A. [p.1] B." -> "A [p.1]. B."
+    moved = re.sub(rf"([.!?。])((?:\s*{cite})+)", lambda m: m.group(2) + m.group(1), answer.strip())
+    pieces = re.split(r"(?<=[.!?。])\s+|\n+", moved)
     out: list[dict] = []
     for piece in pieces:
         ids = re.findall(pattern, piece)
-        text = re.sub(pattern, "", piece).strip()
+        text = re.sub(r"\s+([.!?。])", lambda m: m.group(1), re.sub(pattern, "", piece)).strip()   # 출처를 뺀 자리의 공백 정리
         if not text and ids and out:   # 출처 표시만 따로 떨어진 조각
             out[-1]["citations"] += ids
             continue
@@ -57,7 +60,8 @@ def resolve_citations(citations: Iterable[str], corpus: dict) -> dict:
 
 def quote_in_source(quote: str, source_text: str) -> bool:
     """인용 문구가 원문에 그대로 있는지(공백 · 줄바꿈 차이는 무시). 바꿔 쓴 문장은 False 가 정상입니다."""
-    return bool(quote) and _squash(quote) in _squash(source_text)
+    squashed = _squash(quote)
+    return bool(squashed) and squashed in _squash(source_text)   # 공백뿐인 인용은 False
 
 
 class _Support(BaseModel):
@@ -97,7 +101,11 @@ def citation_support(answer: str, corpus: dict, llm, question: Optional[str] = N
             rows.append({**item, "supported": None, "good_citations": []})
             continue
         texts = [keys[c] for c in ids if c in keys]
-        joint = bool(texts) and _supports(llm, item["sentence"], texts, question)
+        try:
+            joint = bool(texts) and _supports(llm, item["sentence"], texts, question)
+        except Exception as e:   # 판정 실패는 0점이 아니라 오류로 남김
+            rows.append({**item, "supported": None, "good_citations": [], "error": f"{type(e).__name__}: {e}"})
+            continue
         good: list[str] = []
         for c in ids:
             if c not in keys:
@@ -120,6 +128,7 @@ def citation_support(answer: str, corpus: dict, llm, question: Optional[str] = N
         "citation_recall": round(n_supported / n_cited, 3) if n_cited else None,
         "citation_precision": round(n_good / n_cites, 3) if n_cites else None,
         "cited_sentences": n_cited,
-        "uncited": sum(1 for r in rows if r["supported"] is None),
+        "uncited": sum(1 for r in rows if r["supported"] is None and not r.get("error")),
+        "errors": sum(1 for r in rows if r.get("error")),
         "sentences": rows,
     }

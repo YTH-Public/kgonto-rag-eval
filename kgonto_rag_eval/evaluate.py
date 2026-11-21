@@ -14,6 +14,7 @@ def evaluate(
     llm=None,
     keep_reason: bool = True,
     keep_details: bool = True,
+    keep_contexts: bool = True,
 ) -> EvalReport:
     """RAG 평가 데이터셋을 지표들로 채점.
 
@@ -22,6 +23,7 @@ def evaluate(
     llm: 평가자 LLM. 노트북에서 직접 넣는 것을 권장합니다(미지정 시 default_judge()).
     keep_reason: 지표별 reason · failed_component 를 행에 남깁니다.
     keep_details: 지표별 판정 세부(details)와 오류(error)를 행에 남깁니다.
+    keep_contexts: 채점에 쓴 근거 원문(retrieved_contexts)을 행에 남깁니다(판정 오류 추적용).
 
     한 지표의 judge 호출이 실패해도 전체를 멈추지 않고 그 칸을 오류로 남깁니다.
     summary 는 유효 점수만의 평균이고, stats 에 유효 · 누락 · 오류 개수가 함께 있습니다.
@@ -31,8 +33,10 @@ def evaluate(
     judge = llm or default_judge()
 
     rows: list[dict] = []
+    errors = {m.name: 0 for m in metrics}
     for i, sample in enumerate(dataset):
         row: dict = {
+            "idx": i,
             "sample_id": sample.sample_id if sample.sample_id is not None else str(i),
             "user_input": sample.user_input,
             "response": sample.response,
@@ -40,6 +44,8 @@ def evaluate(
             "n_contexts": len(sample.retrieved_contexts),
             **{f"meta__{k}": v for k, v in sample.metadata.items()},
         }
+        if keep_contexts:
+            row["retrieved_contexts"] = list(sample.retrieved_contexts)
         for m in metrics:
             try:
                 res = m.score(sample, judge)
@@ -47,6 +53,8 @@ def evaluate(
                 res = MetricResult(metric=m.name, failed_component="judge",
                                    error=f"{type(e).__name__}: {str(e)[:300]}")
             row[m.name] = res.score
+            if res.error:
+                errors[m.name] += 1
             row[f"{m.name}__verdict"] = res.verdict
             if keep_reason:
                 row[f"{m.name}__reason"] = res.reason
@@ -60,10 +68,9 @@ def evaluate(
     stats: dict = {}
     for m in metrics:
         vals = [r[m.name] for r in rows if r.get(m.name) is not None]
-        errors = sum(1 for r in rows if r.get(f"{m.name}__error"))
         mean = sum(vals) / len(vals) if vals else None
         summary[m.name] = round(mean, 3) if mean is not None else None
         stats[m.name] = {"mean": mean, "valid": len(vals), "missing": len(rows) - len(vals),
-                         "errors": errors}
+                         "errors": errors[m.name]}
 
     return EvalReport(rows=rows, summary=summary, stats=stats)

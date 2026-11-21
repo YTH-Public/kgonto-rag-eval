@@ -40,7 +40,7 @@ class AnswerCorrectness(Metric):
         p, r = max(0.0, min(1.0, v.factual_precision)), max(0.0, min(1.0, v.factual_recall))
         f1 = (2 * p * r / (p + r)) if (p + r) else 0.0
         semantic = max(0.0, min(1.0, v.semantic_adequacy))
-        score = round(0.6 * f1 + 0.4 * semantic, 3)
+        score = 0.6 * f1 + 0.4 * semantic   # 반올림하지 않음
         verdict = MetricResult.verdict_from_score(score)
         return MetricResult(
             metric=self.name, score=score, verdict=verdict, reason=v.reason,

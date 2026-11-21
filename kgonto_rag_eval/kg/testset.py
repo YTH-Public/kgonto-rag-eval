@@ -189,20 +189,28 @@ def to_eval_dataset(items: list[TestItem], rag_fn, allow_status=("keep", "edit")
     """
     from ..schema import EvaluationDataset
 
+    import warnings
+
     allowed = set(allow_status)
-    rows = []
+    rows, skipped = [], []
     for it in items:
         if it.review_status not in allowed:
+            continue
+        issues = validate_item(it)
+        if issues:   # 승인된 문항이라도 자동 검사에 걸리면 실행하지 않음
+            skipped.append((it.id, issues))
             continue
         answer, contexts = rag_fn(it.question)
         rows.append({
             "sample_id": it.id,
             "user_input": it.question,
-            "retrieved_contexts": list(contexts),
+            "retrieved_contexts": contexts,   # 문자열 하나면 EvalSample 이 오류로 막음
             "response": answer,
             "reference": it.reference,
             "metadata": {"split": it.split, "query_type": it.query_type, "answerable": it.answerable},
         })
+    if skipped:
+        warnings.warn(f"자동 검사에 걸려 건너뛴 문항: {skipped}")
     return EvaluationDataset.from_list(rows)
 
 

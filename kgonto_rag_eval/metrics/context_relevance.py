@@ -47,7 +47,7 @@ class ContextRelevance(Metric):
         if unknown:
             return self.judge_error(f"알 수 없는 라벨: {unknown}", raw=v.model_dump())
         labels = [it.label for it in sorted(v.items, key=lambda x: x.index)]
-        score = round(sum(_LABEL_SCORE[label] for label in labels) / n, 3)
+        score = sum(_LABEL_SCORE[label] for label in labels) / n   # 반올림하지 않음
         verdict = MetricResult.verdict_from_score(score)
         return MetricResult(
             metric=self.name, score=score, verdict=verdict, reason=v.reason,
