@@ -39,13 +39,16 @@ def pairwise_judge(question: str, answer_a: str, answer_b: str, llm,
     한쪽 호출이 실패해도 다른 쪽 결과는 남깁니다.
     """
     out = {"ab": None, "ba": None, "ab_reason": "", "ba_reason": "", "error": None}
-    try:
-        ab = _ask(llm, question, answer_a, answer_b, criteria)
-        out["ab"], out["ab_reason"] = {"1": "A", "2": "B", "tie": "tie"}[ab.winner], ab.reason
-        ba = _ask(llm, question, answer_b, answer_a, criteria)
-        out["ba"], out["ba_reason"] = {"1": "B", "2": "A", "tie": "tie"}[ba.winner], ba.reason
-    except Exception as e:
-        out["error"] = f"{type(e).__name__}: {e}"
+    errors = []
+    for name, first, second, back in (("ab", answer_a, answer_b, {"1": "A", "2": "B", "tie": "tie"}),
+                                      ("ba", answer_b, answer_a, {"1": "B", "2": "A", "tie": "tie"})):
+        try:   # 한 순서가 실패해도 다른 순서는 물어봄
+            v = _ask(llm, question, first, second, criteria)
+            out[name], out[f"{name}_reason"] = back[v.winner], v.reason
+        except Exception as e:
+            errors.append(f"{name}: {type(e).__name__}: {e}")
+    if errors:
+        out["error"] = " | ".join(errors)
         return {**out, "consistent": False, "final": "error"}
     consistent = out["ab"] == out["ba"]
     return {**out, "consistent": consistent, "final": out["ab"] if consistent else "inconsistent"}

@@ -107,5 +107,31 @@ class EvalReport(BaseModel):
 
         return pd.DataFrame(self.rows)
 
+    def explain(self, sample_id, metric: Optional[str] = None) -> dict:
+        """샘플 하나의 점수와 저장해 둔 이유 · 세부를 꺼냅니다(모델을 다시 부르지 않음).
+
+        report.explain("P064", "answer_relevancy") -> {"sample_id", "user_input", "response", "reference",
+            "metric", "score", "verdict", "reason", "failed_component", "details", "error"}
+        metric 을 빼면 {지표 이름: 위와 같은 dict} 를 "metrics" 에 담아 돌려줍니다.
+        """
+        found = [row for row in self.rows if str(row.get("sample_id")) == str(sample_id)]
+        if not found:
+            raise KeyError(f"sample_id 가 없습니다: {sample_id}")
+        if len(found) > 1:
+            raise ValueError(f"sample_id 가 {len(found)}번 나옵니다: {sample_id}")
+        row = found[0]
+        names = list(self.summary)
+        if metric is not None and metric not in names:
+            raise KeyError(f"지표가 없습니다: {metric} (있는 지표: {names})")
+
+        def one(name: str) -> dict:
+            parts = ("verdict", "reason", "failed_component", "details", "error")
+            return {"metric": name, "score": row.get(name), **{k: row.get(f"{name}__{k}") for k in parts}}
+
+        base = {k: row.get(k) for k in ("sample_id", "user_input", "response", "reference")}
+        if metric is not None:
+            return {**base, **one(metric)}
+        return {**base, "metrics": {name: one(name) for name in names}}
+
     def __repr__(self) -> str:
         return f"EvalReport(summary={self.summary})"

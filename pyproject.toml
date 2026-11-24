@@ -1,6 +1,6 @@
 [project]
 name = "kgonto-rag-eval"
-version = "0.2.0"
+version = "0.2.1"
 description = "KG·온톨로지 친화 RAG 평가 프레임워크. LangChain v1 위의 경량 LLM-as-judge 지표 + KG 결정적 지표 + 인용 · 기준선 검사."
 readme = "README.md"
 requires-python = ">=3.12"

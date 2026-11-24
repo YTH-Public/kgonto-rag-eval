@@ -17,6 +17,7 @@ __all__ = [
     "load_kg",
     "PersonaSpec",
     "DEFAULT_PERSONAS",
+    "ESG_PERSONAS",
     "auto_personas_from_graph",
     "PathEvidence",
     "TestItem",
@@ -42,6 +43,7 @@ __all__ = [
 _LAZY_EXPORTS = {
     "PersonaSpec": ("kgonto_rag_eval.kg.personas", "PersonaSpec"),
     "DEFAULT_PERSONAS": ("kgonto_rag_eval.kg.personas", "DEFAULT_PERSONAS"),
+    "ESG_PERSONAS": ("kgonto_rag_eval.kg.personas", "ESG_PERSONAS"),
     "auto_personas_from_graph": ("kgonto_rag_eval.kg.personas", "auto_personas_from_graph"),
     "PathEvidence": ("kgonto_rag_eval.kg.testset", "PathEvidence"),
     "TestItem": ("kgonto_rag_eval.kg.testset", "TestItem"),

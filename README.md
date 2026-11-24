@@ -1,6 +1,6 @@
 # kgonto-rag-eval
 
-지식그래프와 온톨로지에 잘 맞는 **RAG 평가 프레임워크**입니다. (v0.2.0)
+지식그래프와 온톨로지에 잘 맞는 **RAG 평가 프레임워크**입니다. (v0.2.1)
 
 LangChain v1 위에서 동작하며, 네 가지 일을 합니다.
 
@@ -17,7 +17,7 @@ LangChain v1 위에서 동작하며, 네 가지 일을 합니다.
 학생 · 수업용(버전 고정):
 
 ```bash
-pip install "kgonto-rag-eval[kg,pandas] @ git+https://github.com/YTH-Public/kgonto-rag-eval@v0.2.0"
+pip install "kgonto-rag-eval[kg,pandas] @ git+https://github.com/YTH-Public/kgonto-rag-eval@v0.2.1"
 ```
 
 코드를 고치며 쓸 때:

@@ -77,14 +77,14 @@ _SYSTEM = """당신은 인용 검증자입니다. '근거 글'이 '문장'의 �
 - 근거 글에 없는 내용이 하나라도 있으면 false. 세상 지식으로 맞아도 근거 글에 없으면 false."""
 
 
-def _supports(llm, sentence: str, texts: list[str], question: Optional[str]) -> bool:
+def _supports(llm, sentence: str, texts: list[str], question: Optional[str]) -> _Support:
     joined = "\n\n".join(f"[근거 {i + 1}] {t}" for i, t in enumerate(texts))
     q = f"질문: {question}\n\n" if question else ""
     v = llm.with_structured_output(_Support).invoke([
         SystemMessage(content=_SYSTEM),
         HumanMessage(content=f"{q}문장: {sentence}\n\n근거 글:\n{joined}"),
     ])
-    return bool(v.supported)
+    return v
 
 
 def citation_support(answer: str, corpus: dict, llm, question: Optional[str] = None,
@@ -92,7 +92,10 @@ def citation_support(answer: str, corpus: dict, llm, question: Optional[str] = N
     """ALCE 아이디어를 적용한 수업용 인용 지표(LLM 판정).
 
     corpus: 출처 ID -> 원문. 풀리지 않는 ID 는 뒷받침하지 않는 출처로 셉니다.
-    반환: citation_recall, citation_precision, 문장별 판정(sentences), 출처 없는 문장 수(uncited).
+    반환: citation_recall, citation_precision, 문장별 판정(sentences), 출처 없는 문장 수(uncited),
+        attempted(출처가 있어 판정하려 한 문장 수 = cited_sentences + errors).
+        sentences 의 각 문장에는 reason(결합 판정의 이유)과 judgements(판정마다 kind · citation · supported · reason)가 있습니다.
+        kind: joint(단 출처를 모두 합침) | alone(그 출처만) | rest(그 출처를 뺀 나머지).
     호출 수: 출처 단 문장마다 1번 + (출처가 2개 이상이면) 출처마다 최대 2번.
     """
     keys = {str(k): v for k, v in corpus.items()}
@@ -101,11 +104,19 @@ def citation_support(answer: str, corpus: dict, llm, question: Optional[str] = N
     for item in split_cited_sentences(answer, pattern):
         ids = [str(c) for c in item["citations"]]
         if not ids:
-            rows.append({**item, "supported": None, "good_citations": []})
+            rows.append({**item, "supported": None, "good_citations": [], "reason": "", "judgements": []})
             continue
+        judgements: list[dict] = []
+
+        def ask(kind: str, texts: list[str], citation: Optional[str] = None) -> bool:
+            """판정 한 번 - 이유까지 judgements 에 남김"""
+            v = _supports(llm, item["sentence"], texts, question)
+            judgements.append({"kind": kind, "citation": citation, "supported": bool(v.supported), "reason": v.reason})
+            return bool(v.supported)
+
         try:   # 문장 하나의 판정(결합 · 혼자 · 나머지)을 모두 감쌈 - 실패는 0점이 아니라 오류
             texts = [keys[c] for c in ids if c in keys]
-            joint = bool(texts) and _supports(llm, item["sentence"], texts, question)
+            joint = bool(texts) and ask("joint", texts)
             good: list[str] = []
             if joint:   # 원 논문: 결합 판정이 True 일 때만 출처의 쓸모를 셈
                 for c in ids:
@@ -114,24 +125,27 @@ def citation_support(answer: str, corpus: dict, llm, question: Optional[str] = N
                     if len(ids) == 1:
                         good.append(c)
                         continue
-                    alone = _supports(llm, item["sentence"], [keys[c]], question)
+                    alone = ask("alone", [keys[c]], c)
                     rest = [keys[o] for o in ids if o != c and o in keys]
-                    if alone or not (rest and _supports(llm, item["sentence"], rest, question)):
+                    if alone or not (rest and ask("rest", rest, c)):
                         good.append(c)
         except Exception as e:
-            rows.append({**item, "supported": None, "good_citations": [], "error": f"{type(e).__name__}: {e}"})
+            rows.append({**item, "supported": None, "good_citations": [], "error": f"{type(e).__name__}: {e}",
+                         "reason": "", "judgements": judgements})
             continue
         n_cited += 1
         n_supported += int(joint)
         n_cites += len(ids)
         n_good += len(good)
-        rows.append({**item, "supported": joint, "good_citations": good})
+        reason = judgements[0]["reason"] if judgements else "출처 ID 가 자료에 없습니다."
+        rows.append({**item, "supported": joint, "good_citations": good, "reason": reason, "judgements": judgements})
     uncited = sum(1 for r in rows if r["supported"] is None and not r.get("error"))
     return {
         "citation_recall": round(n_supported / n_cited, 3) if n_cited else None,
         "citation_recall_all": round(n_supported / (n_cited + uncited), 3) if (n_cited + uncited) else None,
         "citation_precision": round(n_good / n_cites, 3) if n_cites else None,
         "cited_sentences": n_cited,
+        "attempted": n_cited + sum(1 for r in rows if r.get("error")),
         "uncited": uncited,
         "errors": sum(1 for r in rows if r.get("error")),
         "sentences": rows,

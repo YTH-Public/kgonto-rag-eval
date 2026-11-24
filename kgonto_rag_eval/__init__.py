@@ -19,7 +19,7 @@ __all__ = [
     "resolve_citations",
     "quote_in_source",
 ]
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 _LAZY_EXPORTS = {
     "EvalSample": ("kgonto_rag_eval.schema", "EvalSample"),

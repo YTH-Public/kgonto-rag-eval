@@ -28,9 +28,11 @@ class Faithfulness(Metric):
 
     def score(self, sample: EvalSample, llm) -> MetricResult:
         if not sample.retrieved_contexts:
-            return MetricResult(metric=self.name, score=0.0, reason="검색 문맥이 없습니다.")
+            return MetricResult(metric=self.name, score=0.0, verdict="fail", reason="검색 문맥이 없습니다.",
+                                failed_component="retriever")
         if not sample.response.strip():
-            return MetricResult(metric=self.name, score=0.0, reason="답변이 비어 있습니다.")
+            return MetricResult(metric=self.name, score=0.0, verdict="fail", reason="답변이 비어 있습니다.",
+                                failed_component="generator")
         v = llm.with_structured_output(_FaithVerdict).invoke([
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=f"참고 문맥:\n{sample.context_text}\n\n답변:\n{sample.response}"),

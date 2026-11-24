@@ -1,5 +1,24 @@
 # 변경 기록
 
+## 0.2.1 (2026-11)
+
+쓰기 편하게 고쳤습니다. **지표의 프롬프트 · 점수식은 0.2.0 과 같습니다.**
+
+### 더한 것
+- `Metric.needs_llm`(기본 True): 코드 지표에 `needs_llm = False` 를 적으면 `evaluate` 가 기본 판정 모델을 만들지 않습니다.
+- `evaluate(..., max_workers=4)`: 샘플을 동시에 채점합니다(기본 1, 행 순서는 입력 순서).
+- `report.explain(sample_id, metric)`: 저장된 점수 · 이유 · 세부를 꺼냅니다(모델을 다시 부르지 않음).
+- `citation_support`: 문장마다 `reason` · `judgements`(판정별 이유), 전체에 `attempted`. 기존 칸과 점수는 그대로.
+- `ESG_PERSONAS`.
+
+### 고친 것
+- Faithfulness 의 빈 답 · 빈 근거가 0점인데 `verdict` 가 비어 있던 문제.
+- `pairwise_judge`: AB 순서가 실패하면 BA 순서를 묻지 않던 문제 → 둘을 따로 묻고, 하나라도 실패하면 `final="error"`.
+
+### 바뀐 것
+- `DEFAULT_PERSONAS` 가 ESG 예시에서 분야를 가리지 않는 세 가지로 바뀌었습니다.
+  전처럼 쓰려면 `generate_testset_from_kg(..., personas=ESG_PERSONAS)`.
+
 ## 0.2.0 (2026-11)
 
 잘못된 점수가 나오던 곳부터 고쳤습니다.

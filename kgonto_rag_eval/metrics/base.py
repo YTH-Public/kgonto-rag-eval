@@ -9,6 +9,7 @@ from ..schema import EvalSample, MetricResult
 class Metric(ABC):
     name: str = "metric"
     requires_reference: bool = False   # reference 가 있어야 평가 가능한 지표면 True
+    needs_llm: bool = True             # 모델을 부르지 않는 코드 지표면 False (기본 판정 모델을 만들지 않음)
 
     @abstractmethod
     def score(self, sample: EvalSample, llm) -> MetricResult:

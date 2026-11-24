@@ -11,8 +11,18 @@ class PersonaSpec(BaseModel):
     style: str = ""
 
 
-# 기본 페르소나 3종 (KG 노드/관계 타입에서 도출한 예시, 필요하면 직접 정의)
+# 기본 페르소나 3종 - 분야를 가리지 않는 예시. 내 데이터에 맞는 페르소나를 직접 넣는 것을 권합니다.
 DEFAULT_PERSONAS = [
+    PersonaSpec(name="처음 알아보는 사람", role="이 주제를 잘 모르고 기본 사실을 알고 싶다.",
+                style="쉬운 말로 짧게 묻는다."),
+    PersonaSpec(name="담당 실무자", role="업무에 쓰려고 정확한 이름 · 조건 · 관계를 확인한다.",
+                style="대상과 조건을 정확히 짚어 묻는다."),
+    PersonaSpec(name="비교 검토자", role="여러 대상의 관계와 차이를 따져 본다.",
+                style="둘 이상을 잇거나 견주어 묻는다."),
+]
+
+# 기업 ESG 데이터용 예시 (0.2.0 의 기본값)
+ESG_PERSONAS = [
     PersonaSpec(name="투자자", role="재무 성과와 ESG 리스크가 기업 가치에 주는 영향을 확인한다.",
                 style="수치, 비교, 근거를 요구한다."),
     PersonaSpec(name="ESG담당자", role="환경·사회·지배구조 활동이 어떤 영역과 지표에 연결되는지 점검한다.",
