@@ -1,5 +1,26 @@
 # 변경 기록
 
+## 0.3.0 (2026-11)
+
+기존 여섯 지표의 이름 · 프롬프트 · 점수식은 0.2 와 같습니다. 새 지표는 골라 쓰는 것이라 `CORE_METRICS` · `ALL_METRICS` 에 넣지 않았습니다.
+
+### 더한 지표
+- `AnsweredRelevancy`: 답했는지 먼저 보고, 답하지 않았으면 0, 답했으면 `AnswerRelevancy` 그대로(호출 1 ~ 2번).
+- `FactCoverage`: 필수사실(`metadata["expected_facts"]`)마다 있음 · 빠짐 · 어긋남과 답의 근거 문구(호출 1번). 있다고 한 문구가 답에 없으면 오류, 답하지 않은 답은 코드로 0점.
+- `FactHit` · `CitedRetrieved`: 모델을 부르지 않는 코드 지표.
+
+### 더한 것
+- `diagnose(report)`: 점수를 조합해 의심할 곳(검색 · 생성 · 거절 · 다른 자료)을 찾음. 원인을 확정하지 않음.
+- GraphRAG 중간 단계(`kgonto_rag_eval.kg`, 모델 · DB 없음): `compare_result_rows`(질의 실행 결과 비교), `entity_link_recall`(출발점), `evidence_bundle_coverage`(근거 묶음).
+- `extract_citations`, `split_cited_sentences` · `citation_support` 의 `ranges=True`(출처 범위 [p.1-3] 펼치기, 기본은 전과 같음).
+- `report.meta`(패키지 판 · 지표 프롬프트 · 판정 모델 · 문항 해시 · `run_meta`), `compare_baseline(strict_meta=True)`.
+- 행마다 `__status`(ok · not_applicable · error) · `__reason_code`, `stats` 에 `not_applicable`.
+
+### 바뀐 것 (옮겨 올 때 볼 것)
+- 지표 점수가 0 ~ 1 밖이면 그 칸은 오류입니다(직접 만든 지표 확인).
+- `evaluate` 에 같은 이름의 지표나 같은 `sample_id` 를 주면 ValueError.
+- 코드 지표나 지표 코드의 실수(KeyError · ZeroDivisionError 등)는 `failed_component="metric"` (전에는 judge).
+
 ## 0.2.1 (2026-11)
 
 쓰기 편하게 고쳤습니다. **지표의 프롬프트 · 점수식은 0.2.0 과 같습니다.**

@@ -79,14 +79,26 @@ def test_answered_second_call_failure_is_error():
 
 # ---------------------------------------------------------------- FactCoverage
 def test_fact_coverage_labels():
-    llm = FakeLLM([{"items": [fact(1, "present", ["만기 3년"]), fact(2, "contradicted", ["월 최대 50만 원"])]}])
+    llm = FakeLLM([{"answered": True, "items": [fact(1, "present", ["만기 3년"]), fact(2, "contradicted", ["월 최대 50만 원"])]}])
     r = FactCoverage().score(sample(), llm)
     assert r.score == 0.5 and r.details["contradicted"] == ["월 50만 원"] and r.details["missing"] == []
     assert "어긋남" in r.reason and llm.calls == 1
 
 
+def test_fact_coverage_refusal_is_zero_by_code():
+    llm = FakeLLM([{"answered": False, "items": [fact(1, "present", ["만기 3년"]), fact(2, "missing")]}])
+    r = FactCoverage().score(sample("만기 3년인지는 자료에 없습니다."), llm)
+    assert r.score == 0.0 and r.details["answered"] is False and len(r.details["missing"]) == 2 and "답하지 않음" in r.reason
+
+
+def test_fact_coverage_refusal_ignores_bad_quote():
+    llm = FakeLLM([{"answered": False, "items": [fact(1, "present", ["답에 없는 문구"]), fact(2, "missing")]}])
+    r = FactCoverage().score(sample("자료에 없습니다."), llm)
+    assert r.score == 0.0 and r.status == "ok"
+
+
 def test_fact_coverage_quote_ignores_space_and_marks():
-    llm = FakeLLM([{"items": [fact(1, "present", ["만기  **3년**"])]}])
+    llm = FakeLLM([{"answered": True, "items": [fact(1, "present", ["만기  **3년**"])]}])
     assert FactCoverage().score(sample("적금은 만기 3년입니다.", ["만기 3년"]), llm).score == 1.0
 
 
@@ -98,7 +110,7 @@ def test_fact_coverage_quote_ignores_space_and_marks():
     [fact(0, "missing"), fact(1, "missing")],                          # 범위 밖
 ])
 def test_fact_coverage_bad_verdict_is_error(items):
-    r = FactCoverage().score(sample(), FakeLLM([{"items": items}]))
+    r = FactCoverage().score(sample(), FakeLLM([{"answered": True, "items": items}]))
     assert r.score is None and r.status == "error" and r.failed_component == "judge"
 
 

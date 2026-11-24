@@ -1,6 +1,6 @@
 # kgonto-rag-eval
 
-지식그래프와 온톨로지에 잘 맞는 **RAG 평가 프레임워크**입니다. (v0.2.1)
+지식그래프와 온톨로지에 잘 맞는 **RAG 평가 프레임워크**입니다. (v0.3.0)
 
 LangChain v1 위에서 동작하며, 네 가지 일을 합니다.
 
@@ -17,7 +17,7 @@ LangChain v1 위에서 동작하며, 네 가지 일을 합니다.
 학생 · 수업용(버전 고정):
 
 ```bash
-pip install "kgonto-rag-eval[kg,pandas] @ git+https://github.com/YTH-Public/kgonto-rag-eval@v0.2.1"
+pip install "kgonto-rag-eval[kg,pandas] @ git+https://github.com/YTH-Public/kgonto-rag-eval@v0.3.0"
 ```
 
 코드를 고치며 쓸 때:
@@ -104,6 +104,31 @@ evaluate(ds, [HasSource()])
 | `AnswerCorrectness` | 사실 P/R 의 F1 × 0.6 + 의미 적합도 × 0.4 | 필요 |
 | `AnswerRelevancy` | 질문의 의도 중 답이 직접 다룬 비율 - 장황함 감점 | 필요 없음 |
 
+필요할 때 골라 쓰는 지표(v0.3)입니다. `CORE_METRICS` · `ALL_METRICS` 에는 들어 있지 않습니다.
+
+| 지표 | 무엇을 보나 | 필요한 것 | 판정 호출 |
+|---|---|---|---:|
+| `AnsweredRelevancy` | 답했는지 먼저 봄. 답하지 않았으면 0, 답했으면 `AnswerRelevancy` | 없음 | 1 ~ 2 |
+| `FactCoverage` | 필수사실마다 있음 · 빠짐 · 어긋남, 근거 문구 | `metadata["expected_facts"]` | 1 |
+| `FactHit` | 필수사실이 글자 그대로 있는 비율(정답률 아님) | `metadata["expected_facts"]` | 0 |
+| `CitedRetrieved` | 답의 출처 가운데 실제로 검색된 자료의 비율 | `metadata["retrieved_ids"]` | 0 |
+
+```python
+from kgonto_rag_eval import diagnose, evaluate
+from kgonto_rag_eval.metrics import AnswerCorrectness, ContextRecall, FactCoverage
+
+rows = [{"sample_id": "P001", "user_input": "청년 월세 지원은 얼마까지 몇 달 받나요?", "response": "월 최대 20만 원입니다.",
+         "reference": "월 최대 20만 원, 최장 24개월", "retrieved_contexts": ["월 최대 20만 원을 최장 24개월 지원한다."],
+         "metadata": {"expected_facts": ["월 최대 20만 원", "최장 24개월"]}}]
+report = evaluate(rows, [FactCoverage(), ContextRecall(), AnswerCorrectness()], llm=judge)
+report.explain("P001", "fact_coverage")["details"]   # 사실마다 있음 · 빠짐 · 어긋남, 근거 문구
+diagnose(report)                                      # 의심할 곳(확정 아님)
+```
+
+- 필수사실 하나에는 대상과 조건을 함께 적습니다. 대상이 빠지면 다른 제도의 비슷한 내용도 있음으로 볼 수 있습니다.
+- `FactCoverage` 는 필수사실 **밖의** 틀린 내용을 보지 않습니다. `AnswerCorrectness` · `Faithfulness` 와 함께 읽습니다.
+- `AnsweredRelevancy` 가 0 이라고 나쁜 답은 아닙니다. 근거가 없을 때의 거절은 옳은 답일 수 있습니다.
+
 점수는 0.0 ~ 1.0, 판정(`verdict`)은 0.8 이상 pass · 0.5 이상 partial · 나머지 fail 입니다.
 
 ### 지표 정의 비교
@@ -177,6 +202,32 @@ schema_violation_rate(entities, relations, allowed_types={"회사", "품목"},
 | `source_traceability` | 출처 칸(page · chunk · provenance 등)이 있는 비율 | 출처가 **붙었는지**만 봄. 관계의 `source` 칸(주어)은 출처로 세지 않음 |
 
 `path_recall` 은 v0.1 이름으로 남겨 두었습니다(= `path_entity_recall`).
+
+## GraphRAG 중간 단계 평가 (LLM · DB 없이)
+
+그래프에 묻는 RAG 는 답이 틀려도 어디서 틀렸는지 답만 봐서는 알 수 없습니다. 실행 기록을 단계마다 봅니다.
+DB 에 붙지 않습니다. 미리 실행해 저장한 결과를 넣습니다.
+
+```python
+from kgonto_rag_eval.kg import compare_result_rows, entity_link_recall, evidence_bundle_coverage
+
+# 1) 출발점 - 맞는 노드를 찾았나 (이름이 아니라 ID)
+entity_link_recall(["법 제29조"], ["법 제7조", "법 제29조"], k=5)          # recall 1.0, 순위 2
+
+# 2) 질의 - 글자가 아니라 실행 결과를 비교
+compare_result_rows(
+    predicted=[{"회사": "가", "cnt": 3}], reference=[{"회사": "가", "n": 3}],
+    mode="multiset", columns={"회사": "string", "n": "integer"}, aliases={"cnt": "n"})   # ex 1.0
+
+# 3) 근거 - 답 모델에 실제로 보낸 사실이 충분한가 (묶음 안은 모두, 묶음끼리는 하나만)
+evidence_bundle_coverage(
+    [[("법 제29조", "위임", "영 제30조"), ("영 제30조", "위임", "안전성 확보조치 기준")]],
+    [("법 제29조", "위임", "영 제30조")])                                      # coverage 0.5, complete False
+```
+
+- 실행 오류 · 시간 초과를 빈 목록으로 바꾸지 마세요. `predicted_status="query_error"` 로 넣으면 0점으로 남습니다.
+- 결과가 같아도 질의의 뜻이 같다는 증명은 아닙니다. 조건을 빠뜨린 질의가 우연히 같은 수를 낼 수 있으므로, 조건이 갈리는 작은 데이터로 한 번 더 확인합니다.
+- 정답 질의를 사람이 쓸 때는 다른 방법(원본 표 집계)으로 결과를 대조해 두세요.
 
 ## 인용 검사
 

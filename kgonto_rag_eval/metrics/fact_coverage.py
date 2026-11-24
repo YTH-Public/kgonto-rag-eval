@@ -24,6 +24,7 @@ class _FactVerdict(BaseModel):
 
 
 class _FactVerdicts(BaseModel):
+    answered: bool = Field(description="질문이 물은 것 가운데 하나라도 실제 내용으로 답했으면 true, 자료에 없다고만 했으면 false")
     items: list[_FactVerdict] = Field(description="필수사실마다 하나씩")
 
 
@@ -33,7 +34,7 @@ _SYSTEM = """당신은 필수사실 채점자입니다. 필수사실마다 답�
 - contradicted: 답이 그 사실과 다른 값 · 대상 · 조건을 말합니다.
 - 질문이 묻는 바로 그 대상에 대한 내용이어야 합니다. 다른 제도 · 다른 대상의 같은 금액이나 비슷한 나이는 present 가 아닙니다.
 - 필수사실에 질문이 이미 정해 준 조건이 섞여 있으면, 답이 그 조건을 전제로 나머지를 말했을 때 present 입니다. 질문 조건만으로 이루어진 사실도 답이 그 대상에 대해 답했으면 present 입니다.
-- 답이 질문에 답하지 않았으면(자료에 없다고 함) present 로 보지 않습니다.
+- 먼저 답이 질문에 답했는지(answered) 봅니다. 질문의 조건만 되풀이하고 물은 것은 자료에 없다고 했으면 false 입니다.
 - quotes 에는 판단에 쓴 답의 문구를 글자 그대로 옮깁니다. 필수사실의 문구를 옮기지 마세요.
 - 모든 번호(1..N)를 한 번씩 판정합니다."""
 
@@ -84,23 +85,27 @@ class FactCoverage(Metric):
         items = []
         for fact, v in zip(facts, verdicts):
             quotes = [q for q in v.quotes if _squash(q)]
-            if v.label == "present" and (not quotes or any(_squash(q) not in answer for q in quotes)):
+            if out.answered and v.label == "present" and (not quotes or any(_squash(q) not in answer for q in quotes)):
                 return self.judge_error(f"present 인데 근거 문구가 답에 없습니다: {fact} / {v.quotes}", raw=out.model_dump())
             items.append({"fact": fact, "label": v.label, "quotes": quotes, "reason": v.reason})
-        return self._result(items)
+        if not out.answered:   # 답하지 않은 답이 질문의 조건을 되풀이한 것은 있음으로 세지 않음 (코드로 정함)
+            for item in items:
+                if item["label"] == "present":
+                    item.update(label="missing", reason="답하지 않은 답이 되풀이한 문구: " + item["reason"])
+        return self._result(items, out.answered)
 
-    def _result(self, items: list[dict]) -> MetricResult:
+    def _result(self, items: list[dict], answered: bool = False) -> MetricResult:
         """사실별 판정 -> 점수 · 빠진 사실 · 어긋난 사실"""
         present = [i for i in items if i["label"] == "present"]
         missing = [i["fact"] for i in items if i["label"] == "missing"]
         contradicted = [i["fact"] for i in items if i["label"] == "contradicted"]
         score = len(present) / len(items)
         verdict = MetricResult.verdict_from_score(score)
-        parts = [f"있음 {len(present)} / {len(items)}"]
+        parts = [f"있음 {len(present)} / {len(items)}"] + ([] if answered else ["질문에 답하지 않음"])
         if missing:
             parts.append("빠짐: " + ", ".join(missing))
         if contradicted:
             parts.append("어긋남: " + ", ".join(contradicted))
         return MetricResult(metric=self.name, score=score, verdict=verdict, reason=" | ".join(parts),
                             failed_component="generator" if verdict == "fail" else None,
-                            details={"items": items, "missing": missing, "contradicted": contradicted})
+                            details={"items": items, "missing": missing, "contradicted": contradicted, "answered": answered})

@@ -38,12 +38,13 @@ def _diagnose_row(row: dict, names: list[str], low: float, high: float) -> list[
     if failed:
         found.append({"sample_id": row["sample_id"], "suspect": "채점 실패", "because": ", ".join(failed),
                       "check": "점수가 낮은 것이 아니라 채점이 안 된 것입니다. 오류 이유부터 봅니다."})
-    refused = (row.get("answered_relevancy__details") or {}).get("answered") is False
+    judged = [n for n in ("answered_relevancy", "fact_coverage") if (row.get(f"{n}__details") or {}).get("answered") is False]
+    refused = bool(judged)   # 두 지표 가운데 하나라도 답하지 않았다고 봄
     wrong = next((n for n in _ANSWER if is_low(n)), None)
     if refused and is_high("context_recall"):
-        add("지나친 거절", ["answered_relevancy", "context_recall"], "근거에 답이 있는데 답하지 않았는지 봅니다.")
+        add("지나친 거절", [judged[0], "context_recall"], "근거에 답이 있는데 답하지 않았는지 봅니다.")
     if refused and is_low("context_recall"):
-        add("근거가 없어 거절", ["answered_relevancy", "context_recall"], "옳은 거절일 수 있습니다. 검색을 먼저 봅니다.")
+        add("근거가 없어 거절", [judged[0], "context_recall"], "옳은 거절일 수 있습니다. 검색을 먼저 봅니다.")
     if not refused and is_low("context_recall") and wrong:
         add("검색이 근거를 못 찾음", ["context_recall", wrong], "검색된 근거에 정답의 내용이 있는지 봅니다.")
     if not refused and is_high("context_recall") and wrong:
