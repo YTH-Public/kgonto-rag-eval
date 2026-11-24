@@ -44,7 +44,7 @@ def _code_parts(code) -> list:
 def _code_sha(cls) -> str:
     """지표의 프롬프트 · 스키마 · 계산이 바뀌었는지 볼 지문. 물려받은 클래스까지 봅니다.
 
-    패키지의 지표는 모듈 글 전체, 직접 만든 지표는 클래스 안 함수의 바이트코드로 봅니다.
+    패키지의 지표는 모듈 글 전체, 직접 만든 지표는 클래스 안 함수의 바이트코드 · 기본 인자 · 클래스에 적은 설정으로 봅니다.
     (직접 만든 지표는 파이썬 판이 바뀌면 달라지고, 클래스 밖에 둔 프롬프트는 보지 못합니다 -> run_meta["conditions"] 에 적습니다.)
     """
     parts = []
@@ -54,7 +54,13 @@ def _code_sha(cls) -> str:
         if c.__module__.startswith("kgonto_rag_eval."):
             parts.append(inspect.getsource(sys.modules[c.__module__]).replace("\r\n", "\n"))
         else:
-            parts.append([[k, _code_parts(v.__code__)] for k, v in sorted(vars(c).items()) if inspect.isfunction(v)])
+            for k, v in sorted(vars(c).items()):
+                if inspect.isfunction(v):          # 계산 + 기본 인자 + 바깥에서 가져다 쓴 단순한 값
+                    cells = [x.cell_contents for x in v.__closure__ or ()]
+                    values = [v.__defaults__, v.__kwdefaults__, [x for x in cells if _plain(x)]]
+                    parts.append([k, _code_parts(v.__code__), [x if _plain(x) else repr(type(x)) for x in values]])
+                elif not k.startswith("__") and _plain(v):
+                    parts.append([k, v])           # 클래스에 적은 설정
     return _sha(parts)
 
 
@@ -93,7 +99,8 @@ def _failed_component(metric, e: Exception) -> str:
         return "metric"
     tb = e.__traceback__
     while tb:
-        if tb.tb_frame.f_code.co_name in ("invoke", "ainvoke"):
+        frame = tb.tb_frame
+        if frame.f_code.co_name in ("invoke", "ainvoke") and frame.f_locals.get("self") is not metric:   # 지표 자신의 함수 이름은 빼고
             return "judge"
         tb = tb.tb_next
     return "metric" if isinstance(e, _CODE_ERRORS) else "judge"

@@ -50,8 +50,10 @@ def quote_in_answer(quote: str, answer: str) -> bool:
     chars = [re.escape(c) for c in q if not c.isspace()]
     if not chars:
         return False
-    head = r"(?<!\d)(?<!\d[.,])" if q[0].isdigit() else ""
-    tail = r"(?!\d|[.,]\d)" if q[-1].isdigit() else ""
+    head = r"(?<!\d)(?<!\d\.)" if q[0].isdigit() else ""
+    if re.match(r"\d{3}(?!\d)", q):                 # 세 자리로 시작하면 천 단위의 뒷부분인지 봄(1,150 속의 150), 2024,2025 같은 나열은 통과
+        head += r"(?<!\d,)"
+    tail = r"(?!\d|\.\d|,\d{3}(?!\d))" if q[-1].isdigit() else ""
     return re.search(head + r"\s*".join(chars) + tail, _plain(answer)) is not None
 
 

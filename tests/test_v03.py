@@ -388,7 +388,7 @@ def test_bundles_bad_input():
 
 # ---------------------------------------------------------------- Codex 점검에서 나온 반례
 @pytest.mark.parametrize("quote, answer, ok", [
-    ("1.5%", "금리는 15%입니다.", False), ("5%", "금리는 15%입니다.", False), ("15", "금리는 15.5%", False), ("15", "1,15", False),
+    ("1.5%", "금리는 15%입니다.", False), ("5%", "금리는 15%입니다.", False), ("15", "금리는 15.5%", False), ("150", "1,150원", False), ("1", "1,150원", False), ("2025년", "2024,2025년", True), ("2024", "2024,2025년", True), ("1.5", "11.5", False), ("5", "1.5", False),
     ("1.5%", "금리는 **1.5 %**입니다 [p.3].", True), ("19~34세", "19 ~ 34세", True), ("19~34세", "1934세", False),
     ("-5", "5", False), ("만기 3년입니다.", "만기 3년입니다 [p.1].", True), ("15%", "2026 15%", True), ("", "x", False), (" . ", "x", False),
 ])
@@ -483,3 +483,46 @@ def test_bundle_string_and_shown_values():
         evidence_bundle_coverage([["a"]], "abc")
     r = ex([{"v": True, "w": {"a": [1]}}], [{"v": False, "w": {"a": [2]}}])
     assert r["missing"] == [{"v": False, "w": {"a": [2]}}] and r["extra"] == [{"v": True, "w": {"a": [1]}}]
+
+
+def test_code_fingerprint_sees_class_settings_and_defaults(tmp_path):
+    def by_class(scale):
+        class Custom(Metric):
+            name, needs_llm, weight = "custom", False, scale
+
+            def score(self, sample, llm=None):
+                return MetricResult(metric=self.name, score=self.weight)
+        return Custom()
+
+    def by_default(scale):
+        class Custom(Metric):
+            name, needs_llm = "custom", False
+
+            def score(self, sample, llm=None, weight=scale):
+                return MetricResult(metric=self.name, score=weight)
+        return Custom()
+
+    def by_closure(scale):
+        class Custom(Metric):
+            name, needs_llm = "custom", False
+
+            def score(self, sample, llm=None):
+                return MetricResult(metric=self.name, score=scale)
+        return Custom()
+    s = {**sample().model_dump(), "sample_id": "a"}
+    for make in (by_class, by_default, by_closure):
+        one = evaluate([s], [make(0.5)])
+        assert strict_pair(tmp_path, one, evaluate([s], [make(0.5)])) == []
+        assert strict_pair(tmp_path, one, evaluate([s], [make(1.0)])) == ["metrics.custom"]
+
+
+def test_metric_own_invoke_is_not_judge():
+    class Local(Metric):
+        name = "local"
+
+        def invoke(self):
+            return MetricResult(metric=self.name, score=3)
+
+        def score(self, sample, llm):
+            return self.invoke()
+    assert evaluate([sample().model_dump()], [Local()], llm=object()).rows[0]["local__failed_component"] == "metric"
