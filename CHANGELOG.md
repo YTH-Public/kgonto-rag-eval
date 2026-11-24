@@ -13,13 +13,13 @@
 - `diagnose(report)`: 점수를 조합해 의심할 곳(검색 · 생성 · 거절 · 다른 자료)을 찾음. 원인을 확정하지 않음.
 - GraphRAG 중간 단계(`kgonto_rag_eval.kg`, 모델 · DB 없음): `compare_result_rows`(질의 실행 결과 비교), `entity_link_recall`(출발점), `evidence_bundle_coverage`(근거 묶음).
 - `extract_citations`, `split_cited_sentences` · `citation_support` 의 `ranges=True`(출처 범위 [p.1-3] 펼치기, 기본은 전과 같음).
-- `report.meta`(패키지 판 · 지표 프롬프트 · 판정 모델 · 문항 해시 · `run_meta`), `compare_baseline(strict_meta=True)`.
+- `report.meta`(패키지 판 · 지표 코드와 설정의 지문 · 판정 모델과 옵션 · 문항 해시 · `run_meta`), `compare_baseline(strict_meta=True)`. `run_meta` 에 비밀 값으로 보이는 이름이 있으면 ValueError.
 - 행마다 `__status`(ok · not_applicable · error) · `__reason_code`, `stats` 에 `not_applicable`.
 
 ### 바뀐 것 (옮겨 올 때 볼 것)
-- 지표 점수가 0 ~ 1 밖이면 그 칸은 오류입니다(직접 만든 지표 확인).
-- `evaluate` 에 같은 이름의 지표나 같은 `sample_id` 를 주면 ValueError.
-- 코드 지표나 지표 코드의 실수(KeyError · ZeroDivisionError 등)는 `failed_component="metric"` (전에는 judge).
+- 지표 점수가 0 ~ 1 밖이거나 `score` 와 `error` 를 함께 주면 그 칸은 오류입니다(직접 만든 지표 확인).
+- `evaluate` 에 같은 이름의 지표나 같은 `sample_id`(순번으로 채운 것 포함)를 주면 ValueError.
+- `failed_component`: 모델 호출 안에서 난 오류는 judge, 코드 지표나 지표 코드의 실수는 metric(전에는 모두 judge).
 
 ## 0.2.1 (2026-11)
 

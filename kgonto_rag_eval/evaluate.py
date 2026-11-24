@@ -2,22 +2,72 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Sequence
+
+from pydantic import ValidationError
 
 from .llm import default_judge
 from .metrics.base import Metric
 from .schema import EvaluationDataset, EvalReport, MetricResult
 
 
-_CODE_ERRORS = (KeyError, IndexError, AttributeError, TypeError, ZeroDivisionError)   # 지표 코드 · 입력의 문제로 보는 예외
+_CODE_ERRORS = (KeyError, IndexError, AttributeError, TypeError, ZeroDivisionError, ValidationError)   # 지표 코드 · 입력의 문제로 보는 예외
+_SECRET = re.compile(r"api[_-]?key|secret|passw(or)?d|authorization|(access|auth|bearer)[_-]?token", re.I)
+_JUDGE_OPTIONS = ("temperature", "top_p", "seed", "reasoning_effort", "reasoning", "use_responses_api")   # 기록해도 되는 것만
 
 
 def _sha(value) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+
+
+def _plain(value) -> bool:
+    """기록해도 되는 단순한 값인지 (글자 · 숫자 · 참거짓 · 그 묶음)"""
+    if isinstance(value, dict):
+        return all(isinstance(k, str) and _plain(v) for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return all(_plain(v) for v in value)
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
+def _code_parts(code) -> list:
+    """함수의 실행 내용 - 파일 위치 · 줄 번호는 빼고 (노트북에서 만든 지표도 비교할 수 있게)"""
+    consts = [_code_parts(c) if inspect.iscode(c) else sorted(map(repr, c)) if isinstance(c, frozenset) else repr(c) for c in code.co_consts]
+    return [code.co_code.hex(), list(code.co_names), consts]
+
+
+def _code_sha(cls) -> str:
+    """지표의 프롬프트 · 스키마 · 계산이 바뀌었는지 볼 지문. 물려받은 클래스까지 봅니다.
+
+    패키지의 지표는 모듈 글 전체, 직접 만든 지표는 클래스 안 함수의 바이트코드로 봅니다.
+    (직접 만든 지표는 파이썬 판이 바뀌면 달라지고, 클래스 밖에 둔 프롬프트는 보지 못합니다 -> run_meta["conditions"] 에 적습니다.)
+    """
+    parts = []
+    for c in cls.__mro__:
+        if c is object or c.__module__ == "kgonto_rag_eval.metrics.base":
+            continue
+        if c.__module__.startswith("kgonto_rag_eval."):
+            parts.append(inspect.getsource(sys.modules[c.__module__]).replace("\r\n", "\n"))
+        else:
+            parts.append([[k, _code_parts(v.__code__)] for k, v in sorted(vars(c).items()) if inspect.isfunction(v)])
+    return _sha(parts)
+
+
+def _check_run_meta(value, path: str = "run_meta") -> None:
+    """비밀 값으로 보이는 이름이 있으면 멈춤 - report 와 기준선 파일에 그대로 남기 때문"""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if _SECRET.search(str(k)):
+                raise ValueError(f"{path} 에 비밀 값으로 보이는 이름이 있습니다: {k} (키 · 비밀번호는 넣지 마세요)")
+            _check_run_meta(v, f"{path}.{k}")
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            _check_run_meta(v, path)
 
 
 def _meta(dataset, metrics, judge, max_workers: int, run_meta: Optional[dict]) -> dict:
@@ -27,21 +77,26 @@ def _meta(dataset, metrics, judge, max_workers: int, run_meta: Optional[dict]) -
     questions = [[s.sample_id, s.user_input, s.reference, s.metadata.get("expected_facts")] for s in dataset]
     info = {}
     for m in metrics:
-        module = sys.modules.get(type(m).__module__)
-        prompt = getattr(module, "_SYSTEM", None)
-        info[m.name] = {"class": type(m).__name__, "prompt_sha": _sha(prompt) if prompt else None}
+        config = getattr(m, "__dict__", {})
+        info[m.name] = {"class": type(m).__name__, "code_sha": _code_sha(type(m)),
+                        "config_sha": _sha({k: v if _plain(v) else type(v).__name__ for k, v in config.items()}) if config else None}
     model = getattr(judge, "model_name", None) or getattr(judge, "model", None)
     return {"package_version": __version__, "created_at": datetime.now().isoformat(timespec="seconds"), "n_samples": len(dataset),
             "metrics": info, "judge": str(model) if model else None,
-            "judge_effort": getattr(judge, "reasoning_effort", None) if isinstance(getattr(judge, "reasoning_effort", None), str) else None,
-            "questions_sha": _sha(questions), "max_workers": max_workers, "run_meta": dict(run_meta or {})}
+            "judge_options": {k: v for k in _JUDGE_OPTIONS if (v := getattr(judge, k, None)) is not None and _plain(v)},
+            "questions_sha": _sha(questions), "max_workers": max_workers, "run_meta": json.loads(json.dumps(run_meta or {}, ensure_ascii=False, default=str))}
 
 
 def _failed_component(metric, e: Exception) -> str:
-    """예외가 난 곳 - 코드 지표나 입력 · 코드 실수면 metric, 나머지는 판정 모델 호출 실패로 봄"""
-    if not getattr(metric, "needs_llm", True) or isinstance(e, _CODE_ERRORS):
+    """예외가 난 곳. 코드 지표면 metric, 모델 호출(invoke) 안에서 났으면 judge, 그 밖의 코드 · 입력 실수는 metric."""
+    if not getattr(metric, "needs_llm", True):
         return "metric"
-    return "judge"
+    tb = e.__traceback__
+    while tb:
+        if tb.tb_frame.f_code.co_name in ("invoke", "ainvoke"):
+            return "judge"
+        tb = tb.tb_next
+    return "metric" if isinstance(e, _CODE_ERRORS) else "judge"
 
 
 def evaluate(
@@ -67,7 +122,8 @@ def evaluate(
     max_workers: 동시에 채점할 샘플 수. 1 이면 차례로(기본), 4 면 샘플 네 개를 함께 채점합니다.
         샘플 하나의 지표들은 차례로 채점하고, 행 순서는 입력 순서 그대로입니다.
         채점하면서 자기 상태를 바꾸는 지표를 직접 만들었다면 1 로 두세요.
-    run_meta: report.meta["run_meta"] 에 남길 정보(데이터 판 · 시스템 판 등).
+    run_meta: report.meta["run_meta"] 에 남길 정보. 채점 조건(데이터 판 · 판정 규칙 판)은 {"conditions": {...}} 에 넣으면
+            compare_baseline(strict_meta=True) 가 비교합니다. 시스템 판처럼 비교 대상인 것은 그 밖에 넣습니다. 비밀 값은 넣지 마세요.
 
     한 지표의 judge 호출이 실패해도 전체를 멈추지 않고 그 칸을 오류로 남깁니다.
     summary 는 유효 점수만의 평균이고, stats 에 유효 · 누락 · 오류 개수가 함께 있습니다.
@@ -80,7 +136,8 @@ def evaluate(
     names = [m.name for m in metrics]
     if len(set(names)) != len(names):
         raise ValueError(f"지표 이름이 겹칩니다: {sorted({n for n in names if names.count(n) > 1})}")
-    ids = [s.sample_id for s in dataset if s.sample_id is not None]
+    _check_run_meta(run_meta or {})
+    ids = [s.sample_id if s.sample_id is not None else str(i) for i, s in enumerate(dataset)]   # 안 준 ID 는 순번
     if len(set(ids)) != len(ids):
         raise ValueError(f"sample_id 가 겹칩니다: {sorted({i for i in ids if ids.count(i) > 1})}")
     judge = llm

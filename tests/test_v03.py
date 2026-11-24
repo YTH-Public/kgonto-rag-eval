@@ -384,3 +384,102 @@ def test_bundles_bad_input():
         evidence_bundle_coverage([[]], ["a"])
     with pytest.raises(ValueError):
         evidence_bundle_coverage(["a"], ["a"])
+
+
+# ---------------------------------------------------------------- Codex 점검에서 나온 반례
+@pytest.mark.parametrize("quote, answer, ok", [
+    ("1.5%", "금리는 15%입니다.", False), ("5%", "금리는 15%입니다.", False), ("15", "금리는 15.5%", False), ("15", "1,15", False),
+    ("1.5%", "금리는 **1.5 %**입니다 [p.3].", True), ("19~34세", "19 ~ 34세", True), ("19~34세", "1934세", False),
+    ("-5", "5", False), ("만기 3년입니다.", "만기 3년입니다 [p.1].", True), ("15%", "2026 15%", True), ("", "x", False), (" . ", "x", False),
+])
+def test_quote_in_answer(quote, answer, ok):
+    from kgonto_rag_eval.metrics.fact_coverage import quote_in_answer
+    assert quote_in_answer(quote, answer) is ok
+
+
+@pytest.mark.parametrize("quotes", [["금리는 99%"], []])
+def test_contradicted_needs_real_quote(quotes):
+    r = FactCoverage().score(sample("금리는 1.5%입니다.", ["금리는 1.5%"]), FakeLLM([{"answered": True, "items": [fact(1, "contradicted", quotes)]}]))
+    assert r.status == "error"
+
+
+def test_broken_range_counts_as_outside():
+    for bad in ("[p.9-3]", "[p.1-900]"):
+        r = CitedRetrieved().score(sample(f"가 [p.1] 나 {bad}", retrieved_ids=[1]))
+        assert r.score == 0.5 and r.details["broken"]
+    assert CitedRetrieved().score(sample("가 [p.9-3]", retrieved_ids=[1])).score == 0.0
+
+
+def test_failure_place_by_call_not_type():
+    class Invalid(Metric):
+        name = "invalid"
+
+        def score(self, sample, llm):
+            return MetricResult(metric=self.name, score=3)
+    row = evaluate([sample().model_dump()], [Invalid(), AnsweredRelevancy()], llm=FakeLLM([TypeError("SDK")])).rows[0]
+    assert row["invalid__failed_component"] == "metric" and row["answered_relevancy__failed_component"] == "judge"
+    row = evaluate([sample().model_dump()], [AnsweredRelevancy()], llm=FakeLLM([{"reason": "이유만"}])).rows[0]   # 스키마에 안 맞는 판정
+    assert row["answered_relevancy__failed_component"] == "judge"
+
+
+def test_run_meta_rejects_secrets_and_is_copied():
+    for bad in ({"api_key": "x"}, {"judge": {"OPENAI_API_KEY": "x"}}, {"a": [{"db_password": "x"}]}):
+        with pytest.raises(ValueError):
+            evaluate([sample().model_dump()], [FactHit()], run_meta=bad)
+    meta = {"conditions": {"max_tokens": 5, "input_tokens": [1]}}
+    report = evaluate([sample().model_dump()], [FactHit()], run_meta=meta)
+    meta["conditions"]["max_tokens"] = 9
+    assert report.meta["run_meta"]["conditions"]["max_tokens"] == 5
+
+
+def strict_pair(tmp_path, old, new):
+    path = tmp_path / "b.json"
+    save_baseline(old, path)
+    return compare_baseline(new, path, strict_meta=True)["incomparable"]
+
+
+def test_strict_meta_sees_config_conditions_and_holes(tmp_path):
+    s = {**sample("a [p.1]", left=[1], right=[1]).model_dump(), "sample_id": "a"}
+    a = evaluate([s], [CitedRetrieved("left")], run_meta={"system": "v1", "conditions": {"data": 1}})
+    assert strict_pair(tmp_path, a, evaluate([s], [CitedRetrieved("right")], run_meta={"conditions": {"data": 1}})) == ["metrics.cited_retrieved"]
+    assert strict_pair(tmp_path, a, evaluate([s], [CitedRetrieved("left")], run_meta={"conditions": {"data": 2}})) == ["run_meta.conditions"]
+    assert strict_pair(tmp_path, a, evaluate([s], [CitedRetrieved("left")], run_meta={"system": "v2", "conditions": {"data": 1}})) == []
+    hole = a.model_copy(update={"meta": {"package_version": "0.3.0"}})
+    assert len(strict_pair(tmp_path, hole, hole)) >= 3
+
+
+def test_code_fingerprint_of_custom_metric(tmp_path):
+    class Custom(Metric):
+        name, needs_llm = "custom", False
+
+        def score(self, sample, llm=None):
+            return MetricResult(metric=self.name, score=1.0)
+
+    class Other(Custom):
+        def score(self, sample, llm=None):
+            return MetricResult(metric=self.name, score=0.5)
+    Other.__name__ = "Custom"                                    # 이름이 같아도 계산이 다르면 다른 지표
+    s = {**sample().model_dump(), "sample_id": "a"}
+    one = evaluate([s], [Custom()])
+    assert strict_pair(tmp_path, one, evaluate([s], [Custom()])) == []
+    assert strict_pair(tmp_path, one, evaluate([s], [Other()])) == ["metrics.custom"]
+
+
+def test_auto_id_collision():
+    s = sample().model_dump()
+    with pytest.raises(ValueError):
+        evaluate([s, {**s, "sample_id": "0"}], [FactHit()])
+
+
+@pytest.mark.parametrize("kw", [dict(score=1.0, error="x"), dict(score=1.0, status="error"), dict(status="ok"),
+                                dict(error="x", status="not_applicable")])
+def test_result_contradictions(kw):
+    with pytest.raises(ValueError):
+        MetricResult(metric="m", **kw)
+
+
+def test_bundle_string_and_shown_values():
+    with pytest.raises(ValueError):
+        evidence_bundle_coverage([["a"]], "abc")
+    r = ex([{"v": True, "w": {"a": [1]}}], [{"v": False, "w": {"a": [2]}}])
+    assert r["missing"] == [{"v": False, "w": {"a": [2]}}] and r["extra"] == [{"v": True, "w": {"a": [1]}}]

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from ..citation import extract_citations
+from ..citation import broken_ranges, extract_citations
 from ..schema import EvalSample, MetricResult
 from .base import Metric
 from .fact_coverage import facts_problem, read_facts
@@ -43,7 +43,8 @@ class CitedRetrieved(Metric):
             problem = f"metadata['{self.ids_key}'] 에 검색된 자료 ID 목록이 없습니다."
             return MetricResult(metric=self.name, reason=problem, error=problem, failed_component="input",
                                 reason_code="invalid_input")
-        cites = extract_citations(sample.response)
+        broken = broken_ranges(sample.response)               # 잘못 적은 범위도 출처로 세고, 맞지 않은 것으로 봄
+        cites = extract_citations(sample.response) + broken
         if not cites:
             return MetricResult(metric=self.name, reason="답에 출처가 없습니다.", reason_code="no_citation")
         retrieved = {str(i) for i in ids}
@@ -52,4 +53,4 @@ class CitedRetrieved(Metric):
         return MetricResult(metric=self.name, score=score, verdict=MetricResult.verdict_from_score(score),
                             reason=f"검색되지 않은 출처: {outside}" if outside else "모두 검색된 자료",
                             failed_component="generator" if outside else None,
-                            details={"citations": cites, "outside": outside})
+                            details={"citations": cites, "outside": outside, "broken": broken})

@@ -74,6 +74,10 @@ class MetricResult(BaseModel):
     def _fill_status(self):
         if self.status is None:
             self.status = "error" if self.error else ("ok" if self.score is not None else "not_applicable")
+        if self.error and self.score is not None:
+            raise ValueError("error 가 있으면 score 는 None 이어야 합니다.")
+        if (self.status == "ok") != (self.score is not None) or (self.error and self.status != "error"):
+            raise ValueError(f"status 와 score · error 가 맞지 않습니다: {self.status}, {self.score}, {self.error}")
         return self
 
     @staticmethod

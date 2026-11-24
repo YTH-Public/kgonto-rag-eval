@@ -40,8 +40,16 @@ def expand_ranges(text: str) -> str:
     return _RANGE.sub(one, text or "")
 
 
+def broken_ranges(text: str) -> list[str]:
+    """펼치지 못한 출처 범위(거꾸로 되었거나 너무 넓음)를 적힌 그대로 돌려줍니다: "[p.9-3]" -> "9-3" """
+    return [f"{a}-{b}" for a, b in _RANGE.findall(expand_ranges(text))]
+
+
 def extract_citations(answer: str, pattern: str = DEFAULT_PATTERN, ranges: bool = True) -> list[str]:
-    """답에 적힌 출처 ID 를 적힌 순서대로(중복 포함) 뽑습니다. ranges=True 면 [p.1-3] 을 펼칩니다."""
+    """답에 적힌 출처 ID 를 적힌 순서대로(중복 포함) 뽑습니다. ranges=True 면 [p.1-3] 을 펼칩니다.
+
+    펼치지 못한 범위는 나오지 않으니 broken_ranges 로 따로 봅니다.
+    """
     text = expand_ranges(answer) if ranges else (answer or "")
     return re.findall(pattern, text)
 

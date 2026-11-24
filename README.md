@@ -127,6 +127,9 @@ diagnose(report)                                      # 의심할 곳(확정 아
 
 - 필수사실 하나에는 대상과 조건을 함께 적습니다. 대상이 빠지면 다른 제도의 비슷한 내용도 있음으로 볼 수 있습니다.
 - `FactCoverage` 는 필수사실 **밖의** 틀린 내용을 보지 않습니다. `AnswerCorrectness` · `Faithfulness` 와 함께 읽습니다.
+- `diagnose` 는 채점 대상이 아닌 칸(not_applicable)을 다루지 않습니다. 아무것도 안 나왔다고 통과는 아닙니다. `keep_details=False` 로 채점하면 거절을 가르지 못합니다.
+- 같은 조건에서 채점했는지까지 보려면 `compare_baseline(report, path, strict_meta=True)`. 패키지 판 · 판정 모델과 옵션 · 지표 코드와 설정 · 문항과 정답 · `run_meta["conditions"]` 가 다르면 `incomparable` 에 적고 실패합니다. 클래스 밖에 둔 프롬프트는 보지 못하니 `conditions` 에 판 이름을 적으세요. `run_meta` 는 파일에 그대로 남으므로 키 · 비밀번호를 넣지 마세요.
+- 잘못 적은 출처 범위([p.9-3], 50쪽을 넘는 범위)는 `CitedRetrieved` 가 맞지 않은 출처로 셉니다.
 - `AnsweredRelevancy` 가 0 이라고 나쁜 답은 아닙니다. 근거가 없을 때의 거절은 옳은 답일 수 있습니다.
 
 점수는 0.0 ~ 1.0, 판정(`verdict`)은 0.8 이상 pass · 0.5 이상 partial · 나머지 fail 입니다.

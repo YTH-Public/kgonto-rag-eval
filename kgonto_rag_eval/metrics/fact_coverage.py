@@ -39,9 +39,20 @@ _SYSTEM = """당신은 필수사실 채점자입니다. 필수사실마다 답�
 - 모든 번호(1..N)를 한 번씩 판정합니다."""
 
 
-def _squash(text: str) -> str:
-    """공백 · 문장부호 · 마크다운 표시를 뺀 글자 - 문구가 답에 실제로 있는지 볼 때 씀"""
-    return re.sub(r"[^\w%]", "", text)
+def _plain(text: str) -> str:
+    """출처 표시([p.1])와 마크다운 강조(* ` #)를 뺀 글"""
+    return re.sub(r"\[p\.[^\]]*\]|[*`#]", "", text)
+
+
+def quote_in_answer(quote: str, answer: str) -> bool:
+    """문구가 답에 그대로 있는지 - 공백은 무시, 문장부호는 지킴(1.5% 와 15% 를 구별), 숫자 중간은 맞지 않음(15% 속의 5%)"""
+    q = _plain(quote).strip(" \t\n.,;:\"'()")
+    chars = [re.escape(c) for c in q if not c.isspace()]
+    if not chars:
+        return False
+    head = r"(?<!\d)(?<!\d[.,])" if q[0].isdigit() else ""
+    tail = r"(?!\d|[.,]\d)" if q[-1].isdigit() else ""
+    return re.search(head + r"\s*".join(chars) + tail, _plain(answer)) is not None
 
 
 def read_facts(sample: EvalSample) -> tuple[list[str], Optional[str]]:
@@ -81,12 +92,12 @@ class FactCoverage(Metric):
         if [v.index for v in verdicts] != list(range(1, len(facts) + 1)):
             return self.judge_error(f"필수사실 번호가 1..{len(facts)} 과 맞지 않습니다: {[v.index for v in verdicts]}",
                                     raw=out.model_dump())
-        answer = _squash(sample.response)
         items = []
         for fact, v in zip(facts, verdicts):
-            quotes = [q for q in v.quotes if _squash(q)]
-            if out.answered and v.label == "present" and (not quotes or any(_squash(q) not in answer for q in quotes)):
-                return self.judge_error(f"present 인데 근거 문구가 답에 없습니다: {fact} / {v.quotes}", raw=out.model_dump())
+            quotes = [q for q in v.quotes if q.strip()]
+            checked = v.label == "contradicted" or (v.label == "present" and out.answered)   # 답하지 않은 답의 present 는 아래에서 missing
+            if checked and (not quotes or not all(quote_in_answer(q, sample.response) for q in quotes)):
+                return self.judge_error(f"{v.label} 인데 근거 문구가 답에 없습니다: {fact} / {v.quotes}", raw=out.model_dump())
             items.append({"fact": fact, "label": v.label, "quotes": quotes, "reason": v.reason})
         if not out.answered:   # 답하지 않은 답이 질문의 조건을 되풀이한 것은 있음으로 세지 않음 (코드로 정함)
             for item in items:

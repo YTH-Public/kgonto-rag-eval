@@ -42,6 +42,16 @@ def _freeze(v: Any) -> Any:
     return ("other", str(v))   # 날짜 등
 
 
+def _thaw(v: Any) -> Any:
+    """_freeze 를 되돌림 - 차이를 보여 줄 때 씀 (목록 · 집합은 목록, 날짜 등은 글자)"""
+    if not isinstance(v, tuple):
+        return v
+    kind, value = v
+    if kind == "map":
+        return {k: _thaw(x) for k, x in value}
+    return [_thaw(x) for x in value] if kind in ("list", "set") else value
+
+
 def _convert(value: Any, kind: str, column: str) -> Any:
     if value is None or kind == "any":
         return _freeze(value)
@@ -78,7 +88,7 @@ def _normalize(rows: Iterable[dict], columns: Mapping[str, str], aliases: Mappin
 
 
 def _show(counter: Counter, columns: Mapping[str, str]) -> list[dict]:
-    return [dict(zip(columns, key)) for key in counter.elements()]
+    return [dict(zip(columns, map(_thaw, key))) for key in counter.elements()]
 
 
 def compare_result_rows(
@@ -182,6 +192,8 @@ def evidence_bundle_coverage(reference_bundles: Iterable[Iterable], retrieved_fa
     사실은 ID(글자 · 숫자)나 (주어, 관계, 목적어) 튜플입니다. 방향 · 시점이 중요하면 튜플에 함께 넣으세요.
     반환: {"coverage": 가장 많이 채운 묶음의 비율, "complete", "best_bundle": 그 묶음의 순번(0부터), "missing"}
     """
+    if isinstance(retrieved_facts, (str, bytes)):
+        raise ValueError("retrieved_facts 는 사실의 목록이어야 합니다. 사실이 하나면 [사실] 입니다.")
     bundles = []
     for bundle in reference_bundles:
         if isinstance(bundle, str):
