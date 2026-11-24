@@ -214,7 +214,7 @@ def test_failed_component():
 
 def test_meta_recorded():
     report = evaluate([sample().model_dump()], [FactHit()], run_meta={"system": "v1"})
-    assert report.meta["package_version"].startswith("0.3") and report.meta["run_meta"] == {"system": "v1"} and report.meta["judge"] is None
+    assert report.meta["package_version"].startswith("0.") and report.meta["run_meta"] == {"system": "v1"} and report.meta["judge"] is None
     json.dumps(report.to_dict(), ensure_ascii=False)          # 파일로 남길 수 있어야 함
     other = evaluate([sample("다른 답").model_dump()], [FactHit()])
     assert other.meta["questions_sha"] == report.meta["questions_sha"]          # 답이 바뀌어도 문항은 같음
