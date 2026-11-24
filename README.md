@@ -68,6 +68,25 @@ report = evaluate(ds, metrics=[Faithfulness(), ContextRecall(), AnswerCorrectnes
 print(report.summary)   # 지표별 평균(유효 점수만)
 print(report.stats)     # 지표별 평균 · 유효 · 누락 · 오류 개수
 report.to_pandas()      # 행마다 점수 · 판정 세부(__details) · 오류(__error)
+report.explain("P001", "faithfulness")   # 저장된 점수 · 이유 · 세부 (모델을 다시 부르지 않음)
+```
+
+문항이 많으면 `evaluate(..., max_workers=4)` 로 샘플을 동시에 채점합니다(기본 1, 행 순서는 입력 순서). 호출 수는 같고 기다리는 시간만 줄어듭니다.
+
+모델을 부르지 않는 지표는 `needs_llm = False` 를 적으면 판정 모델 없이 채점합니다.
+
+```python
+from kgonto_rag_eval.metrics import Metric
+from kgonto_rag_eval.schema import MetricResult
+
+class HasSource(Metric):
+    name = "has_source"
+    needs_llm = False
+
+    def score(self, sample, llm):
+        return MetricResult(metric=self.name, score=1.0 if "[p." in sample.response else 0.0)
+
+evaluate(ds, [HasSource()])
 ```
 
 - `retrieved_contexts` 는 문자열 목록이나 langchain `Document` 목록입니다. 문자열 하나를 그대로 넣으면 오류입니다(v0.1 은 글자 단위로 쪼갰습니다).
