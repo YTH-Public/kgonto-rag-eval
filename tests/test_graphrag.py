@@ -307,6 +307,45 @@ def test_cypher_counterexample_and_frames():
     assert report.rows[0]["ex@all__details"]["ex"] == {"원본": 1.0, "반례": 0.0} and "meta__results" not in report.rows[0]
 
 
+def test_cypher_mode_is_in_fingerprint(tmp_path):
+    def run(c):
+        return [{"n": 1}] if c == "G" else [{"n": 1}, {"n": 1}]
+    q = lambda how: [cy("P", how=how)]
+    save_baseline(evaluate_cypher(run, q("set"), mode="how"), tmp_path / "m.json")
+    strict = lambda how: compare_baseline(evaluate_cypher(run, q(how), mode="how"), tmp_path / "m.json", tolerance=1, strict_meta=True)["incomparable"]
+    assert strict("multiset") == ["metrics.ex"] and strict("set") == []
+
+
+def test_cypher_empty_and_columns():
+    empty = lambda c: []
+    assert evaluate_cypher(empty, [cy("P", how="scalar")], mode="how").rows[0]["ex__failed_component"] == "reference"
+    frames = lambda c: pd.DataFrame(columns=["a"] if c == "G" else ["x", "y"])
+    assert evaluate_cypher(frames, [cy("P")]).summary == {"ex": 0.0}                         # 빈 결과라도 열 수가 다름
+    extra = lambda c: [{"n": 1}] if c == "G" else [{"n": 1, "extra": 9}]
+    assert evaluate_cypher(extra, [cy("P")], by="name").summary == {"ex": 0.0}               # 열이 더 있음
+    swapped = lambda c: [{"a": 1, "b": 2}] if c == "G" else [{"b": 2, "a": 1}]
+    assert evaluate_cypher(swapped, [cy("P")], by="name").summary == {"ex": 1.0}
+    assert evaluate_cypher(empty, [cy("P")]).summary == {"ex": 1.0}
+
+
+def test_entity_rank_is_not_pulled_up():
+    assert entity_link_recall(["G"], ["X", "X", "G"], k=2)["recall"] == 0.0
+    assert entity_link_recall(["G"], ["X", "X", "G"])["ranks"] == {"G": 3}
+
+
+def test_break_graph_counts_changes_possible_together():
+    rels, nodes = [T("a", "R", "b"), T("a", "R", "c")], [{"id": x, "label": "N"} for x in "abcd"]
+    assert [len(break_graph(rels, "wrong_target", rate, nodes=nodes)[1]) for rate in (0.5, 1.0)] == [0, 1]
+    more = nodes + [{"id": "e", "label": "N"}]
+    assert [len(break_graph(rels, "wrong_target", rate, nodes=more)[1]) for rate in (0.5, 1.0)] == [1, 2]
+
+
+@pytest.mark.parametrize("stages, keep", [({"graph": "확인", "answer": "확인"}, []), ({"graph": "id"}, []), ({"graph": "note"}, []), (["graph"], ["graph"])])
+def test_stage_names_must_not_clash(stages, keep):
+    with pytest.raises(ValueError, match="겹칩니다"):
+        stage_table([{"id": "q", "graph": False, "answer": True}], stages, keep=keep)
+
+
 def test_cypher_blocked_is_not_run():
     ran = []
     evaluate_cypher(lambda c: ran.append(c) or [], [cy("MATCH (n) SET n.x = 1")])
@@ -320,7 +359,8 @@ def test_cypher_blocked_is_not_run():
     ("MATCH (n {a: 'it\\'s SET'}) RETURN n", None), ("MATCH (n {a: 'x\\\\'}) SET n.b = 'y'", "SET"),
     ("MATCH (n:`SET`) RETURN n // DELETE", None), ("MATCH (n) /* DELETE */ RETURN n", None), ("load\n csv from 'x' as r RETURN r", "LOAD CSV"),
     ("MATCH (n) CALL { WITH n MATCH (n)--(m) RETURN m } RETURN m", None), ("MATCH (n) CALL (n) { SET n.a = 1 } RETURN 1", "SET"),
-    ("CALL apoc.create.node([], {})", "CALL"), ("match(n)create(m)", "CREATE"), ("INSERT (n:A)", "INSERT"), ("MATCH (n:Set) RETURN $set", None),
+    ("CALL apoc.create.node([], {})", "CALL"), ("match(n)create(m)", "CREATE"), ("INSERT (n:A)", "INSERT"),
+    ("RENAME USER alice TO bob", "RENAME"), ("CYPHER 25 GRANT ROLE r TO u", "GRANT"), ("MATCH (start:Station) RETURN start", None), ("RETURN 1; STOP DATABASE x", "STOP"), ("MATCH (n:Set) RETURN $set", None),
 ])
 def test_write_word(text, word):
     assert write_word(text) == word

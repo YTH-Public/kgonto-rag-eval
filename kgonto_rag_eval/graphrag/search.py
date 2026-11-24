@@ -179,8 +179,9 @@ def entity_link_recall(reference_ids: Iterable, retrieved_ids: Sequence, k: Opti
     if isinstance(reference_ids, str) or isinstance(retrieved_ids, str):
         raise ValueError("ID 는 목록으로 넣으세요. 하나면 [ID] 입니다.")
     gold = list(dict.fromkeys(reference_ids))
-    candidates = list(dict.fromkeys(retrieved_ids))[:k]
-    ranks = {c: i for i, c in enumerate(candidates, 1)}
+    ranks: dict = {}
+    for i, c in enumerate(list(retrieved_ids)[:k], 1):      # 겹친 후보가 있어도 원래 순위 그대로
+        ranks.setdefault(c, i)
     found = [g for g in gold if g in ranks]
     return {"recall": len(found) / len(gold) if gold else None, "all_found": len(found) == len(gold) if gold else None,
             "found": found, "missing": [g for g in gold if g not in ranks], "ranks": {g: ranks[g] for g in found}, "k": k}
@@ -218,6 +219,9 @@ def evidence_bundle_coverage(reference_bundles: Iterable[Iterable], retrieved_fa
 
 _WRITE = re.compile(r"(?<![.:$\w])(CREATE|MERGE|DELETE|DETACH|SET|REMOVE|DROP|INSERT|FOREACH|LOAD\s+CSV|CALL)\b", re.I)
 
+_ADMIN = re.compile(r"(?:^|;)\s*(?:CYPHER\s+\d+\s+)?(?:(?:EXPLAIN|PROFILE)\s+)?"
+                    r"(ALTER|RENAME|GRANT|DENY|REVOKE|START|STOP|TERMINATE|ENABLE|DEALLOCATE|REALLOCATE)\b", re.I)   # 문장 첫머리만 (변수 이름 start 와 구별)
+
 
 def write_word(cypher: str) -> Optional[str]:
     """Cypher 글에 DB 를 바꾸거나 프로시저를 부르는 말이 있으면 그 말을, 없으면 None.
@@ -226,6 +230,9 @@ def write_word(cypher: str) -> Optional[str]:
     글자로만 거르는 것이라 안전을 보장하지 않습니다. 읽기 전용 계정 · 읽기 트랜잭션을 함께 쓰세요.
     """
     text = re.sub(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"|`[^`]*`|//[^\n]*|/\*.*?\*/", " ", cypher, flags=re.S)
+    admin = _ADMIN.search(text)
+    if admin:
+        return admin.group(1).upper()
     for m in _WRITE.finditer(text):
         word = re.sub(r"\s+", " ", m.group(1)).upper()
         if word == "CALL" and re.match(r"\s*(\([^()]*\)\s*)?\{", text[m.end():]):
@@ -234,13 +241,17 @@ def write_word(cypher: str) -> Optional[str]:
     return None
 
 
-def _as_rows(result) -> list[dict]:
-    """실행 결과(DataFrame · 사전 목록) -> 사전 목록"""
+def _as_rows(result) -> tuple[list[dict], Optional[list]]:
+    """실행 결과(DataFrame · 사전 목록) -> (사전 목록, 열 이름). 빈 목록이면 열을 알 수 없어 None"""
+    columns = None
     if hasattr(result, "columns") and hasattr(result, "to_dict"):
-        result = result.to_dict(orient="records")
+        columns, result = list(result.columns), result.to_dict(orient="records")
     if result is None or isinstance(result, (str, bytes, dict)):
         raise TypeError(f"실행 결과가 행 목록이 아닙니다: {type(result).__name__}")
-    return [{k: None if _missing(v) else v for k, v in dict(r).items()} for r in result]
+    rows = [{k: None if _missing(v) else v for k, v in dict(r).items()} for r in result]
+    if columns is None and rows:
+        columns = list(dict.fromkeys(k for r in rows for k in r))
+    return rows, columns
 
 
 def _by_position(rows: list[dict]) -> list[dict]:
@@ -252,8 +263,8 @@ class _Ex(Metric):
     """저장해 둔 비교 결과를 점수로 (실행은 evaluate_cypher 가 먼저 함)"""
     needs_llm = False
 
-    def __init__(self, name: str, parts: list, by: str, read_only: bool):
-        self.name, self.parts, self.by, self.read_only = name, parts, by, read_only
+    def __init__(self, name: str, parts: list, by: str, read_only: bool, modes: list):
+        self.name, self.parts, self.by, self.read_only, self.modes = name, parts, by, read_only, modes   # 채점 조건 지문에 들어감
 
     def score(self, sample: EvalSample, llm=None) -> MetricResult:
         results = [sample.metadata["results"][p] for p in self.parts]
@@ -273,9 +284,11 @@ def evaluate_cypher(run, questions, *, question: str = "question", gold: str = "
 
     run   : Cypher 글 -> 행 목록(사전 목록이나 DataFrame) 함수. 저장한 결과를 돌려주는 함수도 됩니다.
             {"원본": run1, "반례": run2} 처럼 여러 데이터를 주면 ex@원본 · ex@반례 와 모두 맞았는지(ex@all)를 냅니다.
-    questions 의 열 : question · gold(정답 Cypher) · cypher(만든 Cypher, 빈 칸이면 못 만든 것) · id
+    questions 의 열 : question · gold_cypher(정답 Cypher) · cypher(만든 Cypher, 빈 칸이면 못 만든 것).
+            열 이름이 다르면 question= · gold= · cypher= · id= 에 내 열 이름을 적습니다.
+            [{"question": "계약은 몇 건?", "gold_cypher": "MATCH (c:Contract) RETURN count(c)", "cypher": "..."}]
     mode  : 비교 방식이 적힌 열 이름 - multiset(기본, 순서 무시) · set(중복도 무시) · ordered(순서까지) · scalar
-    by    : "position"(열을 자리로 맞춤, 열 수가 같아야 함) · "name"(열 이름으로 맞춤)
+    by    : "position"(열을 자리로 맞춤, 열 수가 같아야 함) · "name"(열 이름으로 맞춤, 열 이름이 같아야 함)
     read_only : True 면 만든 Cypher 에 쓰는 말이 있을 때 실행하지 않고 0점(blocked)
 
     1 = 결과가 같음, 0 = 다름 · 실행 실패 · 막힘 · 못 만듦. 정답 Cypher 가 실패하면 점수 없이 오류로 남깁니다.
@@ -308,7 +321,7 @@ def evaluate_cypher(run, questions, *, question: str = "question", gold: str = "
 
     def one(call, want: str, made: str, how: str) -> dict:
         try:
-            reference = _as_rows(call(want))
+            reference, want_columns = _as_rows(call(want))
         except Exception as e:
             return {"ex": None, "status": "reference_error", "reason": f"정답 Cypher 실행 실패: {type(e).__name__}: {str(e)[:200]}"}
         zero = {"ex": 0.0, "reference": reference[:5]}
@@ -318,17 +331,19 @@ def evaluate_cypher(run, questions, *, question: str = "question", gold: str = "
         if blocked:
             return {**zero, "status": "blocked", "reason": f"읽기 전용인데 {blocked} 가 있음"}
         try:
-            predicted = _as_rows(call(made))
+            predicted, made_columns = _as_rows(call(made))
         except Exception as e:
             return {**zero, "status": "query_error", "reason": f"{type(e).__name__}: {str(e)[:200]}"}
         shown = {"reference": reference[:5], "predicted": predicted[:5], "n_reference": len(reference), "n_predicted": len(predicted)}
         a, b = (_by_position(predicted), _by_position(reference)) if by == "position" else (predicted, reference)
-        wide = {len(r) for r in a}, {len(r) for r in b}
-        if by == "position" and a and b and wide[0] != wide[1]:
-            return {"ex": 0.0, "status": "ok", "reason": f"열 수가 다름(만든 것 {sorted(wide[0])}, 정답 {sorted(wide[1])})", **shown}
-        columns = {c: "any" for r in (b or a) for c in r}
-        if not columns:                                     # 둘 다 빈 결과
-            return {"ex": 1.0, "status": "ok", "reason": "둘 다 빈 결과", "empty_match": True, **shown}
+        columns = {c: "any" for r in (b or a) for c in r} or {"1열": "any"}      # 둘 다 비었으면 열을 알 수 없음
+        if how == "scalar" and (len(b) != 1 or len(columns) != 1):
+            return {"ex": None, "status": "reference_error", "reason": "scalar 의 정답은 한 행 · 한 열이어야 합니다."}
+        if made_columns is not None and want_columns is not None:
+            if by == "position" and len(made_columns) != len(want_columns):
+                return {"ex": 0.0, "status": "ok", "reason": f"열 수가 다름(만든 것 {len(made_columns)}, 정답 {len(want_columns)})", **shown}
+            if by == "name" and set(made_columns) != set(want_columns):
+                return {"ex": 0.0, "status": "ok", "reason": f"열 이름이 다름(만든 것 {made_columns}, 정답 {want_columns})", **shown}
         try:
             result = compare_result_rows(a, b, mode=how, columns=columns)
         except ValueError as e:                             # 정답이 비교 방식과 맞지 않음(scalar 인데 여러 행 등)
@@ -342,7 +357,7 @@ def evaluate_cypher(run, questions, *, question: str = "question", gold: str = "
     parts = {f"ex@{n}" if n else "ex": [n] for n in runs}
     if len(runs) > 1:
         parts["ex@all"] = list(runs)
-    report = evaluate(EvaluationDataset(samples=samples), [_Ex(n, p, by, read_only) for n, p in parts.items()], run_meta=run_meta)
+    report = evaluate(EvaluationDataset(samples=samples), [_Ex(n, p, by, read_only, [r[4] for r in rows]) for n, p in parts.items()], run_meta=run_meta)
     for row in report.rows:                                 # 세부는 지표 칸에 있으므로 표에서는 뺌
         row.pop("meta__results")
     return report

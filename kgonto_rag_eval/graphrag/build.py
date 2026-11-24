@@ -181,7 +181,7 @@ def break_graph(relations, kind: str, rate: float, *, seed: int = 0, nodes=None)
     """그래프에 일부러 오류를 넣습니다(실험용). 원본은 고치지 않습니다.
 
     kind  : "missing"(관계를 지움) · "wrong_target"(도착점을 같은 라벨의 다른 노드로, nodes 필요) · "reversed"(방향을 뒤집음)
-    rate  : 바꿀 수 있는 관계 가운데 바꿀 비율 (0 ~ 1, 개수는 내림)
+    rate  : 함께 바꿀 수 있는 관계 가운데 바꿀 비율 (0 ~ 1, 개수는 내림). 전체 관계 수에 대한 비율은 len(바뀐 것) / len(relations)
     seed  : 같은 값이면 같은 관계가 바뀝니다. 비율을 올리면 낮은 비율에서 바꾼 것을 포함합니다.
     반환  : (바꾼 관계 표, 바뀐 것의 표(source · relation · target · new_source · new_target))
 
@@ -216,21 +216,20 @@ def break_graph(relations, kind: str, rate: float, *, seed: int = 0, nodes=None)
         options = [x for x in same_label[label.get(o)] if x not in (s, o) and (s, rel, x) not in exist]
         return (s, random.Random(f"{seed}-{i}").choice(options)) if options else None
 
-    n = math.floor(rate * sum(new_ends(i) is not None for i in order) + 1e-9)
-    changes, gone = [], set()
+    plan = []                                               # 앞에서 만든 관계와 겹치지 않게, 함께 바꿀 수 있는 것 전부
     for i in order:
-        if len(changes) == n:
-            break
-        ends = new_ends(i)                                  # 앞에서 만든 관계와 겹치면 건너뜀
-        if ends is None:
-            continue
+        ends = new_ends(i)
+        if ends is not None:
+            plan.append((i, ends))
+            exist.add((ends[0], rows[i]["relation"], ends[1]))
+    changes, gone = [], set()
+    for i, ends in plan[:math.floor(rate * len(plan) + 1e-9)]:
         s, rel, o = triple(rows[i])
         changes.append({"source": s, "relation": rel, "target": o, "new_source": ends[0], "new_target": ends[1]})
         if kind == "missing":
             gone.add(i)
         else:
             rows[i].update(source=ends[0], target=ends[1])
-            exist.add((ends[0], rel, ends[1]))
     broken = [r for i, r in enumerate(rows) if i not in gone]
     return (_table(broken, dict.fromkeys(c for r in rows for c in r)),
             _table(changes, (*_TRIPLE, "new_source", "new_target")))

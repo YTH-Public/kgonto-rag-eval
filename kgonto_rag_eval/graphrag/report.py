@@ -27,6 +27,9 @@ def stage_table(records, stages: Union[Sequence[str], Mapping[str, str]], *, id:
     names = dict(stages) if isinstance(stages, Mapping) else {s: s for s in stages}
     if isinstance(stages, str) or not names:
         raise ValueError("stages 는 단계 열 이름의 목록입니다.")
+    taken = [id, *names.values(), "first_break", "note", *keep]
+    if len(set(taken)) != len(taken):
+        raise ValueError(f"표의 열 이름이 겹칩니다: {sorted({str(c) for c in taken if taken.count(c) > 1})}")
     rows, seen = [], set()
     for i, record in enumerate(as_records(records)):
         lost = [c for c in (id, *names, *keep) if c not in record]

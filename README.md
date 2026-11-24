@@ -300,6 +300,7 @@ why_missed(pred, gold, pred_names=names)              # 못 뽑은 관계마다 
 broken, changes = break_graph(relations, "wrong_target", 0.1, seed=1, nodes=nodes)
 
 # 만든 Cypher 를 실행해 결과로 비교 - 원본과 반례 데이터에서
+cypher_questions = [{"question": "계약은 몇 건인가요?", "gold_cypher": "MATCH (c:Contract) RETURN count(c)", "cypher": "MATCH (c:Contract) RETURN count(*)"}]
 report = evaluate_cypher({"원본": run_real, "반례": run_other}, cypher_questions)
 report.summary                                        # {"ex@원본": ..., "ex@반례": ..., "ex@all": ...}
 
