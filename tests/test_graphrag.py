@@ -325,7 +325,14 @@ def test_cypher_empty_and_columns():
     assert evaluate_cypher(extra, [cy("P")], by="name").summary == {"ex": 0.0}               # 열이 더 있음
     swapped = lambda c: [{"a": 1, "b": 2}] if c == "G" else [{"b": 2, "a": 1}]
     assert evaluate_cypher(swapped, [cy("P")], by="name").summary == {"ex": 1.0}
-    assert evaluate_cypher(empty, [cy("P")]).summary == {"ex": 1.0}
+    both_empty = evaluate_cypher(empty, [cy("P")])
+    assert both_empty.summary == {"ex": 1.0} and "열은 확인하지 못함" in both_empty.rows[0]["ex__reason"]
+    uneven = lambda c: [{"a": 1}, {"a": 2}] if c == "G" else [{"x": 1}, {"y": 2}]
+    assert evaluate_cypher(uneven, [cy("P")]).rows[0]["ex__details"]["status"] == "query_error"
+    uneven_gold = lambda c: [{"a": 1}, {"b": 2}] if c == "G" else [{"x": 1, "y": 9}, {"x": 2, "y": 9}]
+    assert evaluate_cypher(uneven_gold, [cy("P")]).rows[0]["ex"] is None
+    order = lambda c: [{"a": 1, "b": 2}, {"a": 3, "b": 4}] if c == "G" else [{"x": 1, "y": 2}, {"y": 4, "x": 3}]
+    assert evaluate_cypher(order, [cy("P")]).summary == {"ex": 1.0}
 
 
 def test_entity_rank_is_not_pulled_up():

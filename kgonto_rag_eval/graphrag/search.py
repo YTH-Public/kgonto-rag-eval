@@ -250,13 +250,16 @@ def _as_rows(result) -> tuple[list[dict], Optional[list]]:
         raise TypeError(f"실행 결과가 행 목록이 아닙니다: {type(result).__name__}")
     rows = [{k: None if _missing(v) else v for k, v in dict(r).items()} for r in result]
     if columns is None and rows:
-        columns = list(dict.fromkeys(k for r in rows for k in r))
+        columns = list(rows[0])
+    if any(set(r) != set(columns or ()) for r in rows):
+        raise ValueError("행마다 열이 다릅니다. 실행 결과의 모든 행은 같은 열이어야 합니다.")
     return rows, columns
 
 
 def _by_position(rows: list[dict]) -> list[dict]:
     """열 이름을 자리로 바꿈 (count(c) 와 건수처럼 이름만 다른 열을 맞춰 봄)"""
-    return [{f"{i + 1}열": v for i, v in enumerate(r.values())} for r in rows]
+    order = list(rows[0]) if rows else []
+    return [{f"{i + 1}열": r[c] for i, c in enumerate(order)} for r in rows]
 
 
 class _Ex(Metric):
@@ -348,7 +351,9 @@ def evaluate_cypher(run, questions, *, question: str = "question", gold: str = "
             result = compare_result_rows(a, b, mode=how, columns=columns)
         except ValueError as e:                             # 정답이 비교 방식과 맞지 않음(scalar 인데 여러 행 등)
             return {"ex": None, "status": "reference_error", "reason": f"정답 결과를 비교할 수 없음: {e}"}
-        return {"ex": result["ex"], "status": result["status"], "reason": result["reason"], "empty_match": result["empty_match"],
+        unknown = result["empty_match"] and (made_columns is None or want_columns is None)
+        reason = "둘 다 빈 결과(열은 확인하지 못함)" if unknown else result["reason"]
+        return {"ex": result["ex"], "status": result["status"], "reason": reason, "empty_match": result["empty_match"],
                 "missing": result["missing"][:5], "extra": result["extra"][:5], **shown}
 
     samples = [EvalSample(sample_id=sample_id, user_input=text, response=made, reference=want,
