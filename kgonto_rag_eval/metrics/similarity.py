@@ -11,6 +11,7 @@ class AnswerSimilarity(Metric):
         evaluate(dataset, [AnswerSimilarity(embeddings=OpenAIEmbeddings(model="text-embedding-3-small"))])
 
     scikit-learn 이 필요합니다(pip install "kgonto-rag-eval[similarity]"). 문항마다 임베딩을 한 번 부릅니다(비용 있음).
+    기준선의 엄격 비교는 모델 이름과 차원만 봅니다. 임베딩 전후에 글이나 벡터를 바꿨다면 run_meta["conditions"] 에 적으세요.
     """
     name = "answer_similarity"
     needs_llm = False
@@ -24,12 +25,14 @@ class AnswerSimilarity(Metric):
         self.dimensions = getattr(embeddings, "dimensions", None)
 
     def score(self, sample: EvalSample, llm=None) -> MetricResult:
-        from sklearn.metrics.pairwise import cosine_similarity
-
         if not (sample.reference or "").strip():
             return MetricResult(metric=self.name, reason="기준 답이 없습니다.", reason_code="no_reference")
         if not sample.response.strip():
             return MetricResult(metric=self.name, score=0.0, reason="답변이 비어 있습니다.", failed_component="generator")
+        try:
+            from sklearn.metrics.pairwise import cosine_similarity
+        except ImportError:
+            raise ImportError('scikit-learn 이 없습니다. pip install "kgonto-rag-eval[similarity]" 로 설치하세요.') from None
         answer, reference = self.embeddings.embed_documents([sample.response, sample.reference])
         if not any(answer) or not any(reference):
             raise ValueError("임베딩이 모두 0 입니다.")

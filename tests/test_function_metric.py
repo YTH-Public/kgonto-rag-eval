@@ -115,6 +115,41 @@ def test_fingerprint(tmp_path, monkeypatch):
     assert compare_baseline(evaluate([ROW], [by_helper]), tmp_path / "c.json", tolerance=1, strict_meta=True)["incomparable"] == ["metrics.rule"]
 
 
+def zero():
+    return 0
+
+
+def one_():
+    return 1
+
+
+def test_fingerprint_arguments_defaults_and_partial(tmp_path):
+    from functools import partial
+    ns = {}
+    exec("def f(s, *, a=0, b=1): return a", ns)
+    first = metric(name="rule")(ns["f"])
+    exec("def f(s, *, b=1, a=0): return b", ns)
+    assert differs(tmp_path, first, metric(name="rule")(ns["f"])) == ["metrics.rule"]
+
+    def make(default):
+        def rule(sample, fn=default):
+            return fn()
+        return metric(rule)
+    assert differs(tmp_path, make(zero), make(one_)) == ["metrics.rule"] and differs(tmp_path, make(zero), make(zero)) == []
+
+    def by_value(sample, n):
+        return n
+    p = lambda n: metric(partial(by_value, n=n), name="rule")
+    assert differs(tmp_path, p(0), p(1)) == ["metrics.rule"] and differs(tmp_path, p(0), p(0)) == []
+
+
+def test_blank_reference_is_not_sent_and_keyword_call():
+    judge = FakeJudge(True)
+    out = evaluate([{**ROW, "reference": "  "}], [judge_metric("맞음", "같으면 통과", fields=["reference"])], llm=judge).rows[0]
+    assert out["맞음__status"] == "not_applicable" and judge.seen == []
+    assert metric(lambda sample: sample, name="x")(sample=3) == 3
+
+
 def test_fingerprint_recursion_is_safe():
     @metric
     def loop(sample):

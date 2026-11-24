@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dis
+import functools
 import hashlib
 import inspect
 import json
@@ -40,7 +41,9 @@ def _plain(value) -> bool:
 def _code_parts(code) -> list:
     """함수의 실행 내용 - 파일 위치 · 줄 번호는 빼고 (노트북에서 만든 지표도 비교할 수 있게)"""
     consts = [_code_parts(c) if inspect.iscode(c) else sorted(map(repr, c)) if isinstance(c, frozenset) else repr(c) for c in code.co_consts]
-    return [code.co_code.hex(), list(code.co_names), consts]
+    n_args = code.co_argcount + code.co_kwonlyargcount
+    shape = [code.co_argcount, code.co_posonlyargcount, code.co_kwonlyargcount, code.co_flags & 0x0C, list(code.co_varnames[:n_args])]
+    return [code.co_code.hex(), list(code.co_names), consts, shape]
 
 
 def _global_names(code) -> set:
@@ -52,11 +55,7 @@ def _global_names(code) -> set:
 def _function_parts(fn, seen: tuple = ()) -> list:
     """계산 + 기본 인자 + 바깥에서 가져다 쓴 단순한 값 · 직접 만든 함수"""
     def part(x):
-        if _plain(x):
-            return x
-        if inspect.isfunction(x) and x not in seen and x is not fn and x.__module__ == fn.__module__:
-            return _function_parts(x, (*seen, fn))
-        return repr(type(x))
+        return _part(x, (*seen, fn))
     cells = []
     for x in fn.__closure__ or ():
         try:
@@ -65,6 +64,21 @@ def _function_parts(fn, seen: tuple = ()) -> list:
             cells.append("empty")
     outside = [[n, part(fn.__globals__[n])] for n in sorted(_global_names(fn.__code__)) if n in fn.__globals__]
     return [_code_parts(fn.__code__), part(fn.__defaults__), part(fn.__kwdefaults__), cells, outside]
+
+
+def _part(x, seen: tuple = ()):
+    """지표가 가져다 쓰는 값 하나 -> 비교할 수 있는 모양. 글자 · 숫자는 그대로, 직접 만든 함수는 속까지, 그 밖의 객체는 이름만"""
+    if _plain(x):
+        return x
+    if isinstance(x, functools.partial):
+        return ["partial", _part(x.func, seen), _part(x.args, seen), _part(x.keywords, seen)]
+    if isinstance(x, (list, tuple)):
+        return [_part(v, seen) for v in x]
+    if isinstance(x, dict):
+        return [[repr(k), _part(v, seen)] for k, v in x.items()]
+    if inspect.isfunction(x) and x not in seen and (not seen or x.__module__ == seen[0].__module__):
+        return _function_parts(x, seen)
+    return f"{getattr(x, '__module__', '')}.{getattr(x, '__qualname__', type(x).__name__)}"
 
 
 def _code_sha(cls) -> str:
@@ -101,13 +115,6 @@ def _check_run_meta(value, path: str = "run_meta") -> None:
             _check_run_meta(v, path)
 
 
-def _config_part(value):
-    """지표 하나의 설정값 - 함수(@metric)면 그 실행 내용"""
-    if inspect.isfunction(value):
-        return _function_parts(value)
-    return value if _plain(value) else type(value).__name__
-
-
 def _meta(dataset, metrics, judge, max_workers: int, run_meta: Optional[dict]) -> dict:
     """무엇으로 채점했는지 - 기준선을 비교해도 되는지 볼 때 씁니다"""
     from . import __version__
@@ -117,7 +124,7 @@ def _meta(dataset, metrics, judge, max_workers: int, run_meta: Optional[dict]) -
     for m in metrics:
         config = getattr(m, "__dict__", {})
         info[m.name] = {"class": type(m).__name__, "code_sha": _code_sha(type(m)),
-                        "config_sha": _sha({k: _config_part(v) for k, v in config.items()}) if config else None}
+                        "config_sha": _sha({k: _part(v) for k, v in config.items()}) if config else None}
     model = getattr(judge, "model_name", None) or getattr(judge, "model", None)
     return {"package_version": __version__, "created_at": datetime.now().isoformat(timespec="seconds"), "n_samples": len(dataset),
             "metrics": info, "judge": str(model) if model else None,

@@ -68,6 +68,18 @@ def test_search_bad_input(change, error):
         evaluate_search(args.pop("search"), args.pop("questions"), **args)
 
 
+def test_gold_with_comma_and_positional_k(tmp_path):
+    def run(gold):
+        return evaluate_search(lambda q: ["a"], [{"question": "q", "gold": gold}])
+    save_baseline(run(["a, b", "c"]), tmp_path / "g.json")
+    strict = lambda gold: compare_baseline(run(gold), tmp_path / "g.json", tolerance=1, strict_meta=True)["incomparable"]
+    assert strict(["a", "b, c"]) == ["questions_sha"] and strict(["c", "a, b", "c"]) == []
+
+    def search(q, k, /):
+        return [1][:k]
+    assert evaluate_search(search, [{"question": "q", "gold": 1}]).summary["hit@3"] == 1.0
+
+
 def test_search_baseline(tmp_path):
     def run(gold=1, k=3):
         return evaluate_search(lambda q: [1, 2], [{"question": "a", "gold": gold}], k=k)
@@ -185,6 +197,12 @@ def test_run_rag_stops_with_question_id():
     assert ran == []
 
 
+def test_bad_message_tells_question_and_one_pass_input():
+    with pytest.raises(ValueError, match=r"id=a.*messages\[0\]"):
+        run_rag(lambda q: {"messages": [{"role": "user", "content": q}, AIMessage("A")]}, ONE, contexts="tool", **ARGS)
+    assert run_rag(lambda q: "답", iter([{"question": "q", "_answer": 1}]), contexts=None).samples[0].response == "답"
+
+
 def test_real_langgraph():
     pytest.importorskip("langgraph")
     from langgraph.checkpoint.memory import InMemorySaver
@@ -240,5 +258,26 @@ def test_similarity_empty_and_fingerprint(tmp_path):
 def test_plain_import_does_not_need_sklearn():
     import subprocess
     import sys
-    code = "import sys; sys.modules['sklearn']=None; import kgonto_rag_eval as k; k.evaluate_search, k.run_rag; from kgonto_rag_eval.metrics import AnswerSimilarity"
-    assert subprocess.run([sys.executable, "-c", code], cwd=pathlib.Path(__file__).parents[1]).returncode == 0
+    code = """
+import sys; sys.modules['sklearn'] = None
+import kgonto_rag_eval as k; k.evaluate_search, k.run_rag
+from kgonto_rag_eval.metrics import AnswerSimilarity
+class Emb:
+    def embed_documents(self, texts): return [[1, 0], [1, 0]]
+rows = [dict(user_input='q', response='A', reference=r) for r in (None, 'B')] + [dict(user_input='q', response='', reference='B')]
+out = k.evaluate(rows, [AnswerSimilarity(Emb())]).rows
+assert [r['answer_similarity__status'] for r in out] == ['not_applicable', 'error', 'ok'], out
+assert 'kgonto-rag-eval[similarity]' in out[1]['answer_similarity__error']
+"""
+    done = subprocess.run([sys.executable, "-c", code], cwd=pathlib.Path(__file__).parents[1], capture_output=True, text=True, encoding="utf-8")
+    assert done.returncode == 0, done.stderr
+
+
+@pytest.mark.parametrize("first", ["from kgonto_rag_eval import evaluate_search", "import kgonto_rag_eval.search", "import kgonto_rag_eval.evaluate",
+                                   "from kgonto_rag_eval.kg import compare_kg", "import kgonto_rag_eval.diagnose"])
+def test_evaluate_is_a_function_in_any_import_order(first):
+    import subprocess
+    import sys
+    code = first + "; from kgonto_rag_eval import evaluate, diagnose; assert callable(evaluate) and callable(diagnose)"
+    done = subprocess.run([sys.executable, "-c", code], cwd=pathlib.Path(__file__).parents[1], capture_output=True, text=True, encoding="utf-8")
+    assert done.returncode == 0, done.stderr

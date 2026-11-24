@@ -23,8 +23,8 @@ class FunctionMetric(Metric):
                             "모델을 쓰면 @metric(needs_llm=True) 로 적고 (sample, llm) 을 받으세요.") from None
         self.fn, self.name, self.needs_llm, self.requires_reference = fn, name, needs_llm, requires_reference
 
-    def __call__(self, *args):
-        return self.fn(*args)
+    def __call__(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)
 
     def score(self, sample: EvalSample, llm=None) -> MetricResult:
         if self._no_reference(sample):

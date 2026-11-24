@@ -38,7 +38,6 @@ _LAZY_EXPORTS = {
     "to_dataset": ("kgonto_rag_eval.inputs", "to_dataset"),
     "metric": ("kgonto_rag_eval.metrics.function", "metric"),
     "judge_metric": ("kgonto_rag_eval.metrics.function", "judge_metric"),
-    "evaluate": ("kgonto_rag_eval.evaluate", "evaluate"),
     "default_judge": ("kgonto_rag_eval.llm", "default_judge"),
     "metrics": ("kgonto_rag_eval.metrics", None),
     "pairwise_judge": ("kgonto_rag_eval.judge", "pairwise_judge"),
@@ -49,7 +48,6 @@ _LAZY_EXPORTS = {
     "resolve_citations": ("kgonto_rag_eval.citation", "resolve_citations"),
     "quote_in_source": ("kgonto_rag_eval.citation", "quote_in_source"),
     "extract_citations": ("kgonto_rag_eval.citation", "extract_citations"),
-    "diagnose": ("kgonto_rag_eval.diagnose", "diagnose"),
 }
 
 
@@ -61,3 +59,8 @@ def __getattr__(name: str):
     value = module if attr is None else getattr(module, attr)
     globals()[name] = value
     return value
+
+
+# 모듈과 이름이 같은 함수는 먼저 불러 둠. 나중에 부르면(예: search 가 evaluate 모듈을 부르면) 함수 자리에 모듈이 들어감
+from .diagnose import diagnose  # noqa: E402
+from .evaluate import evaluate  # noqa: E402

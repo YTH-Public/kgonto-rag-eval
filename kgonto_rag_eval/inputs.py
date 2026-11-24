@@ -140,6 +140,9 @@ def _message_text(message) -> str:
 
 def _from_messages(messages, contexts: Optional[str], tools, skip) -> tuple[str, list, list]:
     """그래프의 메시지 -> (답, 도구 결과 글, 부른 도구 이름)"""
+    strange = [n for n, m in enumerate(messages) if not hasattr(m, "type")]
+    if strange:
+        raise ValueError(f"messages[{strange[0]}] 이 LangChain 메시지가 아닙니다: {type(messages[strange[0]]).__name__}")
     last = messages[-1] if messages else None
     if getattr(last, "type", None) != "ai" or last.tool_calls:
         raise ValueError("마지막 메시지가 모델의 답이 아닙니다(중간에 멈췄을 수 있음).")
@@ -182,10 +185,10 @@ def run_rag(rag, questions, *, contexts: Optional[str], question: str = "questio
         raise ValueError("config 는 그래프를 넣었을 때만 씁니다.")
     if "tools_used" in keep and contexts == "tool":
         raise ValueError("tools_used 는 run_rag 가 남기므로 keep 에 적지 않습니다.")
-    blank = "_answer"
-    while any(blank in r for r in as_records(questions)):
+    rows, blank = as_records(questions), "_answer"
+    while any(blank in r for r in rows):
         blank += "_"
-    base = to_dataset([{**r, blank: ""} for r in as_records(questions)], question=question, answer=blank,
+    base = to_dataset([{**r, blank: ""} for r in rows], question=question, answer=blank,
                       reference=reference, id=id, keep=keep)          # 실행하기 전에 질문 표부터 검사
     samples = []
     for i, sample in enumerate(base):

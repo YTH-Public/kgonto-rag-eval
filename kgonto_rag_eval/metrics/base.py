@@ -17,7 +17,7 @@ class Metric(ABC):
         ...
 
     def _no_reference(self, sample: EvalSample) -> bool:
-        return self.requires_reference and not sample.reference
+        return self.requires_reference and not (sample.reference or "").strip()
 
     def judge_error(self, message: str, **details) -> MetricResult:
         """judge 출력이 규칙을 어겼을 때. 점수를 만들지 않고 오류로 남깁니다."""

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from typing import Optional
 
 from .evaluate import evaluate
@@ -69,8 +70,11 @@ def evaluate_search(search, questions, *, question: str = "question", gold: str 
     if hasattr(search, "similarity_search"):
         call = lambda q: search.similarity_search(q, k=k)
     elif callable(search):
-        takes_k = any(p.name == "k" or p.kind is p.VAR_KEYWORD for p in inspect.signature(search).parameters.values())
-        call = (lambda q: search(q, k=k)) if takes_k else search
+        params = list(inspect.signature(search).parameters.values())
+        if any(p.name == "k" and p.kind is p.POSITIONAL_ONLY for p in params):
+            call = lambda q: search(q, k)
+        else:
+            call = (lambda q: search(q, k=k)) if any(p.name == "k" or p.kind is p.VAR_KEYWORD for p in params) else search
     else:
         raise TypeError("search 에는 similarity_search 가 있는 벡터DB 나 검색 함수를 넣으세요.")
 
@@ -99,7 +103,7 @@ def evaluate_search(search, questions, *, question: str = "question", gold: str 
         except Exception as e:
             error = f"{type(e).__name__}: {str(e)[:300]}"
         ids, texts = _found(result, key, k, f"{i}번째 질문의")                     # ID 를 못 읽는 것은 설정 실수라 바로 알림
-        samples.append(EvalSample(sample_id=sample_id, user_input=text, reference=", ".join(sorted(answers)) or None, retrieved_contexts=texts,
+        samples.append(EvalSample(sample_id=sample_id, user_input=text, reference=json.dumps(sorted(set(answers)), ensure_ascii=False) if answers else None, retrieved_contexts=texts,
                                   metadata={"retrieved_ids": ids, "gold_ids": answers, "search_error": error}))
     kinds = ["hit", "mrr"] + (["recall"] if any(len(set(a)) > 1 for _, _, a in rows) else [])
     return evaluate(EvaluationDataset(samples=samples), [_Rank(kind, k, key) for kind in kinds], run_meta=run_meta)
