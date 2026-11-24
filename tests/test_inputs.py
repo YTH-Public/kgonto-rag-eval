@@ -71,11 +71,25 @@ def test_context_shapes():
     ({"sample_id": 1.0}, {}, ValueError),
     ({}, {"keep": "expected_facts"}, TypeError),
     ({"retrieved_ids": [1]}, {"keep": ["retrieved_ids"]}, ValueError),
+    ({"metadata": {"expected_facts": ["old"]}}, {}, ValueError),
+    ({"metadata": {"retrieved_ids": [8]}}, {}, ValueError),
+    ({"metadata": ["x"]}, {}, ValueError),
+    ({"retrieved": [{"text": "x", "page": 3, "metadata": {"page": 7}}]}, {}, ValueError),
+    ({"retrieved": [{"text": "x", "metadata": ["page"]}]}, {}, ValueError),
+    ({"retrieved": [{"text": "x", "page": " "}]}, {}, ValueError),
+    ({"retrieved": [{"text": "x", "page": []}]}, {}, ValueError),
     ({}, {"contexts": None}, ValueError),
 ])
 def test_bad_input_is_error(change, args, error):
     with pytest.raises(error):
-        to_dataset([{**REC[0], **change}, REC[1]], **{**ARGS, **args})
+        to_dataset([{**REC[0], **change}, {"retrieved_ids": [], **REC[1]}], **{**ARGS, **args})
+
+
+def test_existing_metadata_is_kept():
+    record = {**REC[0], "retrieved_ids": [3, 1], "metadata": {"split": "t", "expected_facts": ["f"]}}
+    out = to_dataset([record], **{**ARGS, "keep": ["expected_facts", "retrieved_ids"]}).samples[0].metadata
+    assert out == {"split": "t", "expected_facts": ["f"], "retrieved_ids": [3, 1]}
+    assert record["metadata"] == {"split": "t", "expected_facts": ["f"]}
 
 
 def test_not_a_list():
