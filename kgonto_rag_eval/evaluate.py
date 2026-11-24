@@ -37,8 +37,8 @@ def evaluate(
     """
     if not isinstance(dataset, EvaluationDataset):
         dataset = EvaluationDataset.from_list(list(dataset))
-    if max_workers < 1:
-        raise ValueError("max_workers 는 1 이상이어야 합니다.")
+    if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+        raise ValueError(f"max_workers 는 1 이상의 정수여야 합니다: {max_workers!r}")
     metrics = list(metrics)
     judge = llm
     if judge is None and len(dataset) and any(getattr(m, "needs_llm", True) for m in metrics):

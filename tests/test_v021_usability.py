@@ -102,9 +102,28 @@ def test_parallel_equals_serial():
     assert parallel.stats["faithfulness"]["errors"] == 1 and llm.peak >= 2
 
 
-def test_max_workers_must_be_positive():
+@pytest.mark.parametrize("bad", [0, -1, 1.5, float("nan"), float("inf"), "4", True, None])
+def test_max_workers_must_be_positive_int(bad):
     with pytest.raises(ValueError):
-        evaluate(rows(1), [Length()], max_workers=0)
+        evaluate(rows(1), [Length()], max_workers=bad)
+
+
+@pytest.mark.parametrize("reason, details", [(True, True), (True, False), (False, True), (False, False)])
+def test_explain_respects_keep_options(reason, details):
+    out = {"total_claims": 2, "supported_claims": 1, "reason": "절반만"}
+    one = evaluate(rows(1), [Faithfulness()], llm=FakeLLM([out]), keep_reason=reason, keep_details=details).explain("s0", "faithfulness")
+    assert one["score"] == 0.5 and one["verdict"] == "partial"
+    assert one["reason"] == ("절반만" if reason else None) and (one["details"] is not None) == details
+
+
+def test_mixed_metrics_build_judge_once(monkeypatch):
+    class Code(Length):
+        def score(self, sample, llm):
+            return MetricResult(metric=self.name, score=0.0)
+    calls = []
+    monkeypatch.setattr(ev, "default_judge", lambda: calls.append(1) or EchoLLM())
+    evaluate(rows(2), [Code(), Faithfulness()], max_workers=2)
+    assert len(calls) == 1
 
 
 def test_empty_dataset_needs_no_judge(monkeypatch):
@@ -172,9 +191,14 @@ def test_pairwise_first_failure_still_asks_second():
     assert r["final"] == "error" and r["ab"] is None and r["ba"] == "B" and "boom" in r["error"]
 
 
+def test_pairwise_both_fail():
+    r = pairwise_judge("q", "A", "B", FakeLLM([RuntimeError("x"), RuntimeError("y")]))
+    assert r["final"] == "error" and "x" in r["error"] and "y" in r["error"]
+
+
 def test_default_personas_are_general():
     assert len(DEFAULT_PERSONAS) == 3 and not any("ESG" in p.name for p in DEFAULT_PERSONAS)
-    assert any("ESG" in p.name for p in ESG_PERSONAS)
+    assert [p.name for p in ESG_PERSONAS] == ["투자자", "ESG담당자", "협력회사"]   # 0.2.0 의 기본값
 
 
 # 0.2.0 과 같은 점수 (지표 계산은 바뀌지 않음)
