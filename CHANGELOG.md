@@ -2,7 +2,15 @@
 
 ## 0.3.0 (2026-11)
 
-기존 여섯 지표의 이름 · 프롬프트 · 점수식은 0.2 와 같습니다. 새 지표는 골라 쓰는 것이라 `CORE_METRICS` · `ALL_METRICS` 에 넣지 않았습니다.
+초보가 쓰기 쉽게 고치고 새 지표를 더했습니다. 기존 여섯 지표의 이름 · 프롬프트 · 점수식은 0.2 와 같습니다. 새 지표는 골라 쓰는 것이라 `CORE_METRICS` · `ALL_METRICS` 에 넣지 않았습니다.
+
+### 쓰기 쉽게
+- `to_dataset(표나 기록, question=, answer=, contexts=, ...)`: 내 자료의 열 이름만 적으면 평가 입력이 됩니다. 글자 · `Document` · `{"text": ...}` 근거를 받고, 없는 열 · 겹친 번호 · 값 충돌은 몇 번째 기록의 어느 칸인지 알립니다.
+- `@metric`: 함수 하나가 지표 하나. 참/거짓 · 0 ~ 1 · `(점수, 이유)` · `(점수, 이유, 세부)` · `None` 을 돌려주면 됩니다.
+- `judge_metric(이름, 기준 문장, fields=)`: 기준 문장 하나로 통과 / 실패 지표. 보내는 글은 `.messages(sample)`.
+- `evaluate_search(벡터DB나 검색 함수, 질문 표)`: hit@k · mrr@k(정답이 여럿이면 recall@k).
+- `run_rag(그래프나 함수, 질문 표, contexts=)`: RAG 를 질문마다 한 번 실행해 평가 입력으로. 체크포인터가 있으면 문항마다 새 대화방.
+- `AnswerSimilarity(embeddings=)`: 답과 기준 답의 코사인 유사도(선택 설치 `similarity`).
 
 ### 더한 지표
 - `AnsweredRelevancy`: 답했는지 먼저 보고, 답하지 않았으면 0, 답했으면 `AnswerRelevancy` 그대로(호출 1 ~ 2번).
@@ -11,13 +19,14 @@
 
 ### 더한 것
 - `diagnose(report)`: 점수를 조합해 의심할 곳(검색 · 생성 · 거절 · 다른 자료)을 찾음. 원인을 확정하지 않음.
-- GraphRAG 중간 단계(`kgonto_rag_eval.kg`, 모델 · DB 없음): `compare_result_rows`(질의 실행 결과 비교), `entity_link_recall`(출발점), `evidence_bundle_coverage`(근거 묶음).
 - `extract_citations`, `split_cited_sentences` · `citation_support` 의 `ranges=True`(출처 범위 [p.1-3] 펼치기, 기본은 전과 같음).
 - `report.meta`(패키지 판 · 지표 코드와 설정의 지문 · 판정 모델과 옵션 · 문항 해시 · `run_meta`), `compare_baseline(strict_meta=True)`. `run_meta` 에 비밀 값으로 보이는 이름이 있으면 ValueError.
 - 행마다 `__status`(ok · not_applicable · error) · `__reason_code`, `stats` 에 `not_applicable`.
 
 ### 바뀐 것 (옮겨 올 때 볼 것)
 - 지표 점수가 0 ~ 1 밖이거나 `score` 와 `error` 를 함께 주면 그 칸은 오류입니다(직접 만든 지표 확인).
+- 지표 이름으로 표의 칸 이름(`response` · `sample_id` 등)이나 `__` 가 든 이름을 쓰면 ValueError.
+- 기준 답이 공백뿐이면 기준 답이 없는 것으로 봅니다(`requires_reference` 지표).
 - `evaluate` 에 같은 이름의 지표나 같은 `sample_id`(순번으로 채운 것 포함)를 주면 ValueError.
 - `failed_component`: 모델 호출 안에서 난 오류는 judge, 코드 지표나 지표 코드의 실수는 metric(전에는 모두 judge).
 
