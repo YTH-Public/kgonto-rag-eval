@@ -68,9 +68,11 @@ from kgonto_rag_eval.metrics import Faithfulness
 
 load_dotenv()
 records = [
-    {"no": "Q1", "question": "월세 지원은 한 달에 얼마인가요?", "answer": "월 최대 30만 원입니다.",
+    {"no": "Q1", "question": "월세 지원은 한 달에 얼마인가요?",
+     "answer": "월 최대 30만 원입니다.",
      "found": ["월 최대 20만 원을 최장 24개월 지원한다."]},
-    {"no": "Q2", "question": "몇 달까지 받나요?", "answer": "최장 24개월 받을 수 있습니다. 신청은 복지로에서 하세요.",
+    {"no": "Q2", "question": "몇 달까지 받나요?",
+     "answer": "최장 24개월 받을 수 있습니다. 신청은 복지로에서 하세요.",
      "found": ["월 최대 20만 원을 최장 24개월 지원한다."]},
 ]
 dataset = to_dataset(records, contexts="found", id="no")          # found = 그때 검색된 근거
@@ -96,25 +98,18 @@ report.to_pandas()[["sample_id", "faithfulness", "faithfulness__reason", "친절
 
 | 하고 싶은 일 | 쓰는 함수 | 자세히 |
 |---|---|---|
-| 저장해 둔 답을 채점 | `to_dataset` → `evaluate` | [RAG 채점](docs/rag.md) |
-| 만든 RAG를 실행하며 채점 | `run_rag` → `evaluate` | [RAG 채점](docs/rag.md#만든-rag를-실행하며-채점) |
-| 내 기준으로 채점 | `@metric` · `judge_metric` | [RAG 채점](docs/rag.md#내-지표-만들기) |
+| 저장해 둔 답을 채점 | `to_dataset` → `evaluate` | [기록 채점](docs/rag.md) |
+| 만든 RAG를 실행하며 채점 | `run_rag` → `evaluate` | [실행하며 채점](docs/rag.md#만든-rag를-실행하며-채점) |
+| 내 기준으로 채점 | `@metric` · `judge_metric` | [내 지표 만들기](docs/rag.md#내-지표-만들기) |
 | 벡터DB 검색이 잘 되는지 | `evaluate_search` | [검색 채점](docs/search.md) |
 | 고친 뒤 나빠지지 않았는지 | `save_baseline` · `compare_baseline` | [전후 비교](docs/baseline.md) |
 | 답의 출처가 맞는지 | `citation_support` 등 | [인용 검사](docs/citation.md) |
 | 지식그래프로 시험 문제 만들기 | `kgonto_rag_eval.kg` | [지식그래프](docs/kg.md) |
 | GraphRAG가 어디서 틀리는지 | `kgonto_rag_eval.graphrag` | [GraphRAG 평가](docs/graphrag.md) |
 
-모두 같은 모양입니다. **표를 넣고 → 채점하고 → 표로 봅니다.**
+모두 같은 순서입니다.
 
-```mermaid
-flowchart LR
-    A["질문 · 답 · 근거"] --> B["evaluate"]
-    B --> C["점수 + 이유 표"]
-    C --> D["틀린 질문 읽기"]
-    D --> E["하나만 고치기"]
-    E --> A
-```
+**표 넣기 → 채점 → 틀린 질문의 이유 읽기 → 하나만 고치기 → 다시 채점**
 
 ---
 
