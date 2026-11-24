@@ -9,6 +9,8 @@ from .context_recall import ContextRecall
 from .context_relevance import ContextRelevance
 from .fact_coverage import FactCoverage
 from .faithfulness import Faithfulness
+from .function import judge_metric, metric
+from .similarity import AnswerSimilarity
 
 __all__ = [
     "Metric",
@@ -23,6 +25,9 @@ __all__ = [
     "FactCoverage",
     "FactHit",
     "CitedRetrieved",
+    "AnswerSimilarity",
+    "metric",
+    "judge_metric",
 ]
 
 # 자주 쓰는 기본 묶음
