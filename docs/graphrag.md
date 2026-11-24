@@ -5,12 +5,12 @@
 그래프에 묻는 RAG는 답만 봐서는 어디서 틀렸는지 알 수 없습니다. **구축 → 검색 → 답**을 단계마다 봅니다.
 모델도 DB 연결도 쓰지 않습니다. Neo4j에서 꺼낸 표를 넣고 표를 받습니다.
 
-```mermaid
-flowchart LR
-    B["구축<br/>check_build · why_missed<br/>check_load · break_graph"] --> S["검색<br/>entity_link_recall · evaluate_cypher<br/>evidence_bundle_coverage"]
-    S --> A["답<br/>evaluate"]
-    B & S & A --> T["stage_table<br/>문항마다 처음 끊긴 단계"]
-```
+| 단계 | 함수 |
+|---|---|
+| 1. 구축 - 그래프를 제대로 만들었나 | `check_build` · `why_missed` · `check_load` · `break_graph` |
+| 2. 검색 - 필요한 것을 찾았나 | `entity_link_recall` · `evaluate_cypher` · `evidence_bundle_coverage` |
+| 3. 답 - 맞게 답했나 | `evaluate` ([RAG 채점](rag.md)) |
+| 모아 보기 - 문항마다 처음 끊긴 단계 | `stage_table` |
 
 ```python
 from kgonto_rag_eval.graphrag import break_graph, check_build, check_load, evaluate_cypher, stage_table, why_missed
@@ -30,7 +30,11 @@ why_missed(pred, gold, pred_names=names)              # 못 뽑은 관계마다 
 broken, changes = break_graph(relations, "wrong_target", 0.1, seed=1, nodes=nodes)
 
 # 만든 Cypher 를 실행해 결과로 비교 - 원본과 반례 데이터에서
-cypher_questions = [{"question": "계약은 몇 건인가요?", "gold_cypher": "MATCH (c:Contract) RETURN count(c)", "cypher": "MATCH (c:Contract) RETURN count(*)"}]
+cypher_questions = [{
+    "question": "계약은 몇 건인가요?",
+    "gold_cypher": "MATCH (c:Contract) RETURN count(c)",      # 사람이 쓴 정답
+    "cypher": "MATCH (c:Contract) RETURN count(*)",           # 모델이 만든 것
+}]
 report = evaluate_cypher({"원본": run_real, "반례": run_other}, cypher_questions)
 report.summary                                        # {"ex@원본": ..., "ex@반례": ..., "ex@all": ...}
 
