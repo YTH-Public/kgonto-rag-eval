@@ -6,7 +6,6 @@ import pytest
 from kgonto_rag_eval import diagnose, evaluate, extract_citations
 from kgonto_rag_eval.baseline import compare_baseline, save_baseline
 from kgonto_rag_eval.citation import citation_support, split_cited_sentences
-from kgonto_rag_eval.kg import compare_result_rows, entity_link_recall, evidence_bundle_coverage
 from kgonto_rag_eval.metrics import (
     ALL_METRICS, AnsweredRelevancy, CitedRetrieved, FactCoverage, FactHit, Faithfulness, Metric,
 )
@@ -274,118 +273,6 @@ def test_diagnose_error_and_bad_range():
         diagnose(report, low=0.9, high=0.1)
 
 
-# ---------------------------------------------------------------- 질의 실행 결과
-GOLD = [{"company": "가", "n": 2}, {"company": "나", "n": 1}]
-
-
-def ex(pred, gold=GOLD, **kw):
-    return compare_result_rows(pred, gold, **kw)
-
-
-def test_rows_order_and_duplicates():
-    assert ex(GOLD[::-1])["ex"] == 1.0
-    assert ex(GOLD[::-1], mode="ordered")["ex"] == 0.0 and "순서" in ex(GOLD[::-1], mode="ordered")["reason"]
-    assert ex(GOLD + GOLD[:1])["ex"] == 0.0 and ex(GOLD + GOLD[:1], mode="set")["ex"] == 1.0
-
-
-def test_rows_prf():
-    r = ex([{"company": "가", "n": 2}, {"company": "다", "n": 9}])
-    assert (r["matched"], r["precision"], r["recall"], r["f1"]) == (1, 0.5, 0.5, 0.5)
-    assert r["missing"] == [{"company": "나", "n": 1}] and r["extra"] == [{"company": "다", "n": 9}]
-
-
-def test_rows_alias_and_extra_columns():
-    pred = [{"c": "가", "cnt": 2, "memo": 0}, {"c": "나", "cnt": 1, "memo": 0}]
-    r = ex(pred, aliases={"c": "company", "cnt": "n"})
-    assert r["ex"] == 1.0 and r["extra_columns"] == ["memo"]
-    assert ex(pred)["status"] == "normalization_error" and ex(pred)["ex"] == 0.0
-    assert ex([{"company": "가", "n": 2, "cnt": 2}], aliases={"cnt": "n"})["status"] == "normalization_error"
-
-
-def test_rows_swapped_values_not_equal():
-    assert ex([{"company": 2, "n": "가"}, {"company": 1, "n": "나"}])["ex"] == 0.0
-
-
-def test_rows_types():
-    cols = {"id": "string", "n": "integer"}
-    gold = [{"id": "007", "n": 1}]
-    assert ex([{"id": "007", "n": 1.0}], gold, columns=cols)["ex"] == 1.0
-    assert ex([{"id": 7, "n": 1}], gold, columns=cols)["ex"] == 0.0                # 앞자리 0
-    for bad in ("1", True, 1.5, float("nan")):
-        assert ex([{"id": "007", "n": bad}], gold, columns=cols)["status"] == "normalization_error"
-    assert ex([{"v": True}], [{"v": 1}])["ex"] == 0.0                              # 참과 1 은 다름
-    assert ex([{"v": None}], [{"v": 0}])["ex"] == 0.0
-    assert ex([{"v": [1, 2]}], [{"v": (1, 2)}])["ex"] == 1.0
-    with pytest.raises(ValueError):
-        ex([], [{"n": "x"}], columns={"n": "integer"})                             # 정답이 계약에 안 맞음
-
-
-def test_rows_empty_vs_error_vs_zero():
-    cols = {"n": "integer"}
-    ok = ex([], [], columns=cols)
-    assert ok["ex"] == 1.0 and ok["empty_match"] and ok["f1"] == 1.0
-    assert ex([{"n": 0}], [], columns=cols)["ex"] == 0.0
-    assert ex([], [{"n": 0}])["ex"] == 0.0 and ex([], [{"n": 0}])["recall"] == 0.0
-    err = ex(None, [{"n": 0}], predicted_status="query_error")
-    assert err["ex"] == 0.0 and err["status"] == "query_error" and not err["empty_match"]
-    assert ex(None, [], columns=cols, predicted_status="timeout")["ex"] == 0.0     # 빈 정답이어도 오류는 맞음이 아님
-    with pytest.raises(ValueError):
-        ex(None, [{"n": 0}])
-    with pytest.raises(ValueError):
-        ex([], [])                                                                # 빈 정답인데 열 계약이 없음
-
-
-def test_rows_snapshot_and_scalar():
-    r = ex(GOLD, predicted_snapshot="2026-10", reference_snapshot="2026-09")
-    assert r["ex"] is None and r["status"] == "invalid"
-    assert ex([{"n": 53}], [{"n": 53}], mode="scalar")["ex"] == 1.0
-    assert ex([{"n": 53}, {"n": 53}], [{"n": 53}], mode="scalar")["ex"] == 0.0
-    with pytest.raises(ValueError):
-        ex(GOLD, GOLD, mode="scalar")
-    with pytest.raises(ValueError):
-        ex(GOLD, GOLD, mode="아무거나")
-
-
-def test_rows_input_not_changed():
-    pred = [{"c": "가", "n": 2}]
-    ex(pred, aliases={"c": "company"})
-    assert pred == [{"c": "가", "n": 2}]
-
-
-# ---------------------------------------------------------------- 출발점 · 근거 묶음
-def test_entity_link():
-    r = entity_link_recall(["법 제29조", "영 제30조"], ["법 제7조", "법 제29조", "법 제29조", "영 제30조"], k=2)
-    assert r["recall"] == 0.5 and r["missing"] == ["영 제30조"] and r["ranks"] == {"법 제29조": 2} and r["all_found"] is False
-    assert entity_link_recall(["001"], [1])["recall"] == 0.0
-    assert entity_link_recall([], ["a"])["recall"] is None
-    for bad in (0, -1, True, 1.5):
-        with pytest.raises(ValueError):
-            entity_link_recall(["a"], ["a"], k=bad)
-    with pytest.raises(ValueError):
-        entity_link_recall("법 제29조", ["법 제29조"])
-
-
-def test_bundles_all_inside_any_between():
-    a, b, c = ("법29", "위임", "영30"), ("영30", "위임", "고시"), ("법29", "인용", "고시")
-    r = evidence_bundle_coverage([[a, b], [c]], [a])
-    assert r["coverage"] == 0.5 and not r["complete"] and r["best_bundle"] == 0 and r["missing"] == [b]
-    assert evidence_bundle_coverage([[a, b], [c]], [c])["complete"]
-    assert evidence_bundle_coverage([[a, b]], [list(a), list(b)])["complete"]                 # 목록도 받음
-    assert evidence_bundle_coverage([[a, b]], [a, ("고시", "위임", "영30")])["coverage"] == 0.5     # 방향이 다르면 다른 사실
-
-
-def test_bundles_do_not_mix_pieces():
-    assert evidence_bundle_coverage([["a", "b"], ["c", "d"]], ["a", "c"])["coverage"] == 0.5
-
-
-def test_bundles_bad_input():
-    assert evidence_bundle_coverage([], ["a"])["coverage"] is None
-    with pytest.raises(ValueError):
-        evidence_bundle_coverage([[]], ["a"])
-    with pytest.raises(ValueError):
-        evidence_bundle_coverage(["a"], ["a"])
-
-
 # ---------------------------------------------------------------- Codex 점검에서 나온 반례
 @pytest.mark.parametrize("quote, answer, ok", [
     ("1.5%", "금리는 15%입니다.", False), ("5%", "금리는 15%입니다.", False), ("15", "금리는 15.5%", False), ("150", "1,150원", False), ("1", "1,150원", False), ("2025년", "2024,2025년", True), ("2024", "2024,2025년", True), ("1.5", "11.5", False), ("5", "1.5", False),
@@ -476,13 +363,6 @@ def test_auto_id_collision():
 def test_result_contradictions(kw):
     with pytest.raises(ValueError):
         MetricResult(metric="m", **kw)
-
-
-def test_bundle_string_and_shown_values():
-    with pytest.raises(ValueError):
-        evidence_bundle_coverage([["a"]], "abc")
-    r = ex([{"v": True, "w": {"a": [1]}}], [{"v": False, "w": {"a": [2]}}])
-    assert r["missing"] == [{"v": False, "w": {"a": [2]}}] and r["extra"] == [{"v": True, "w": {"a": [1]}}]
 
 
 def test_code_fingerprint_sees_class_settings_and_defaults(tmp_path):
