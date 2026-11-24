@@ -26,7 +26,7 @@ __all__ = [
     "extract_citations",
     "diagnose",
 ]
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 _LAZY_EXPORTS = {
     "EvalSample": ("kgonto_rag_eval.schema", "EvalSample"),

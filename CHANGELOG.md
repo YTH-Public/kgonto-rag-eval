@@ -1,5 +1,13 @@
 # 변경 기록
 
+## 0.4.0 (2026-11)
+
+GraphRAG 평가 모듈 `kgonto_rag_eval.graphrag` 를 더했습니다(선택 설치 `graphrag`). 모델 · DB 연결 없이 표를 넣고 표를 받습니다. `kgonto_rag_eval.kg` 는 그대로입니다.
+
+- 구축: `check_build`(모양 · 중복 · 출처) · `why_missed`(못 뽑은 까닭) · `check_load`(승인 목록과 적재 대조) · `break_graph`(오류 넣기 실험)
+- 검색: `entity_link_recall`(출발점) · `evaluate_cypher`(원본 · 반례에서 실행 결과 비교) · `compare_result_rows` · `evidence_bundle_coverage`(보낸 근거)
+- 한 표: `stage_table`(문항마다 처음 끊긴 단계, 종합 점수 없음)
+
 ## 0.3.0 (2026-11)
 
 초보가 쓰기 쉽게 고치고 새 지표를 더했습니다. 기존 여섯 지표의 이름 · 프롬프트 · 점수식은 0.2 와 같습니다. 새 지표는 골라 쓰는 것이라 `CORE_METRICS` · `ALL_METRICS` 에 넣지 않았습니다.
