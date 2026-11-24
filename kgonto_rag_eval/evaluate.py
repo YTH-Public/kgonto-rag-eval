@@ -1,6 +1,7 @@
 """evaluate(): 데이터셋 × 지표를 채점해 EvalReport 로."""
 from __future__ import annotations
 
+import dis
 import hashlib
 import inspect
 import json
@@ -19,6 +20,7 @@ from .schema import EvaluationDataset, EvalReport, MetricResult
 
 _CODE_ERRORS = (KeyError, IndexError, AttributeError, TypeError, ZeroDivisionError, ValidationError)   # 지표 코드 · 입력의 문제로 보는 예외
 _SECRET = re.compile(r"api[_-]?key|secret|passw(or)?d|authorization|(access|auth|bearer)[_-]?token", re.I)
+_ROW_NAMES = {"idx", "sample_id", "user_input", "response", "reference", "n_contexts", "retrieved_contexts"}   # 표의 칸이라 지표 이름으로 못 씀
 _JUDGE_OPTIONS = ("temperature", "top_p", "seed", "reasoning_effort", "reasoning", "use_responses_api")   # 기록해도 되는 것만
 
 
@@ -41,11 +43,36 @@ def _code_parts(code) -> list:
     return [code.co_code.hex(), list(code.co_names), consts]
 
 
+def _global_names(code) -> set:
+    """함수가 바깥(전역)에서 가져다 쓰는 이름. 안쪽 함수까지 봅니다."""
+    names = {i.argval for i in dis.get_instructions(code) if i.opname == "LOAD_GLOBAL"}
+    return names.union(*[_global_names(c) for c in code.co_consts if inspect.iscode(c)])
+
+
+def _function_parts(fn, seen: tuple = ()) -> list:
+    """계산 + 기본 인자 + 바깥에서 가져다 쓴 단순한 값 · 직접 만든 함수"""
+    def part(x):
+        if _plain(x):
+            return x
+        if inspect.isfunction(x) and x not in seen and x is not fn and x.__module__ == fn.__module__:
+            return _function_parts(x, (*seen, fn))
+        return repr(type(x))
+    cells = []
+    for x in fn.__closure__ or ():
+        try:
+            cells.append(part(x.cell_contents))
+        except ValueError:                         # 아직 값이 없는 칸
+            cells.append("empty")
+    outside = [[n, part(fn.__globals__[n])] for n in sorted(_global_names(fn.__code__)) if n in fn.__globals__]
+    return [_code_parts(fn.__code__), part(fn.__defaults__), part(fn.__kwdefaults__), cells, outside]
+
+
 def _code_sha(cls) -> str:
     """지표의 프롬프트 · 스키마 · 계산이 바뀌었는지 볼 지문. 물려받은 클래스까지 봅니다.
 
-    패키지의 지표는 모듈 글 전체, 직접 만든 지표는 클래스 안 함수의 바이트코드 · 기본 인자 · 클래스에 적은 설정으로 봅니다.
-    (직접 만든 지표는 파이썬 판이 바뀌면 달라지고, 클래스 밖에 둔 프롬프트는 보지 못합니다 -> run_meta["conditions"] 에 적습니다.)
+    패키지의 지표는 모듈 글 전체, 직접 만든 지표는 클래스 안 함수의 바이트코드 · 기본 인자 · 클래스에 적은 설정과,
+    함수가 가져다 쓴 바깥의 글자 · 숫자 · 함수로 봅니다.
+    (파이썬 판이 바뀌면 달라지고, 바깥의 객체(클래스 · 프롬프트 틀) 속은 보지 못합니다 -> run_meta["conditions"] 에 적습니다.)
     """
     parts = []
     for c in cls.__mro__:
@@ -55,10 +82,8 @@ def _code_sha(cls) -> str:
             parts.append(inspect.getsource(sys.modules[c.__module__]).replace("\r\n", "\n"))
         else:
             for k, v in sorted(vars(c).items()):
-                if inspect.isfunction(v):          # 계산 + 기본 인자 + 바깥에서 가져다 쓴 단순한 값
-                    cells = [x.cell_contents for x in v.__closure__ or ()]
-                    values = [v.__defaults__, v.__kwdefaults__, [x for x in cells if _plain(x)]]
-                    parts.append([k, _code_parts(v.__code__), [x if _plain(x) else repr(type(x)) for x in values]])
+                if inspect.isfunction(v):
+                    parts.append([k, _function_parts(v)])
                 elif not k.startswith("__") and _plain(v):
                     parts.append([k, v])           # 클래스에 적은 설정
     return _sha(parts)
@@ -76,6 +101,13 @@ def _check_run_meta(value, path: str = "run_meta") -> None:
             _check_run_meta(v, path)
 
 
+def _config_part(value):
+    """지표 하나의 설정값 - 함수(@metric)면 그 실행 내용"""
+    if inspect.isfunction(value):
+        return _function_parts(value)
+    return value if _plain(value) else type(value).__name__
+
+
 def _meta(dataset, metrics, judge, max_workers: int, run_meta: Optional[dict]) -> dict:
     """무엇으로 채점했는지 - 기준선을 비교해도 되는지 볼 때 씁니다"""
     from . import __version__
@@ -85,7 +117,7 @@ def _meta(dataset, metrics, judge, max_workers: int, run_meta: Optional[dict]) -
     for m in metrics:
         config = getattr(m, "__dict__", {})
         info[m.name] = {"class": type(m).__name__, "code_sha": _code_sha(type(m)),
-                        "config_sha": _sha({k: v if _plain(v) else type(v).__name__ for k, v in config.items()}) if config else None}
+                        "config_sha": _sha({k: _config_part(v) for k, v in config.items()}) if config else None}
     model = getattr(judge, "model_name", None) or getattr(judge, "model", None)
     return {"package_version": __version__, "created_at": datetime.now().isoformat(timespec="seconds"), "n_samples": len(dataset),
             "metrics": info, "judge": str(model) if model else None,
@@ -143,6 +175,9 @@ def evaluate(
     names = [m.name for m in metrics]
     if len(set(names)) != len(names):
         raise ValueError(f"지표 이름이 겹칩니다: {sorted({n for n in names if names.count(n) > 1})}")
+    bad = [n for n in names if not isinstance(n, str) or not n.strip() or n in _ROW_NAMES or "__" in n]
+    if bad:
+        raise ValueError(f"지표 이름으로 쓸 수 없습니다(표의 칸 이름이거나 '__' 가 있음): {bad}")
     _check_run_meta(run_meta or {})
     ids = [s.sample_id if s.sample_id is not None else str(i) for i, s in enumerate(dataset)]   # 안 준 ID 는 순번
     if len(set(ids)) != len(ids):
