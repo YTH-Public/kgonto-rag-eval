@@ -8,6 +8,7 @@ import inspect
 import json
 import re
 import sys
+import sysconfig
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Sequence
@@ -66,8 +67,18 @@ def _function_parts(fn, seen: tuple = ()) -> list:
     return [_code_parts(fn.__code__), part(fn.__defaults__), part(fn.__kwdefaults__), cells, outside]
 
 
+_STDLIB = sysconfig.get_path("stdlib").replace("\\", "/").lower()
+
+
+def _user_function(fn) -> bool:
+    """사용자가 쓴 함수인지 - 설치한 라이브러리 · 파이썬 기본 라이브러리 · 이 패키지의 함수는 이름만 봅니다(판으로 비교)"""
+    path = fn.__code__.co_filename.replace("\\", "/").lower()
+    return not ("site-packages/" in path or "dist-packages/" in path or path.startswith((_STDLIB + "/", "<frozen"))
+                or (fn.__module__ or "").startswith("kgonto_rag_eval."))
+
+
 def _part(x, seen: tuple = ()):
-    """지표가 가져다 쓰는 값 하나 -> 비교할 수 있는 모양. 글자 · 숫자는 그대로, 직접 만든 함수는 속까지, 그 밖의 객체는 이름만"""
+    """지표가 가져다 쓰는 값 하나 -> 비교할 수 있는 모양. 글자 · 숫자는 그대로, 직접 만든 함수는 다른 파일에 있어도 속까지, 그 밖의 객체는 이름만"""
     if _plain(x):
         return x
     if isinstance(x, functools.partial):
@@ -76,7 +87,7 @@ def _part(x, seen: tuple = ()):
         return [_part(v, seen) for v in x]
     if isinstance(x, dict):
         return [[repr(k), _part(v, seen)] for k, v in x.items()]
-    if inspect.isfunction(x) and x not in seen and (not seen or x.__module__ == seen[0].__module__):
+    if inspect.isfunction(x) and x not in seen and _user_function(x):
         return _function_parts(x, seen)
     return f"{getattr(x, '__module__', '')}.{getattr(x, '__qualname__', type(x).__name__)}"
 

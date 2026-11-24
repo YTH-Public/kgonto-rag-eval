@@ -143,6 +143,27 @@ def test_fingerprint_arguments_defaults_and_partial(tmp_path):
     assert differs(tmp_path, p(0), p(1)) == ["metrics.rule"] and differs(tmp_path, p(0), p(0)) == []
 
 
+def test_fingerprint_sees_function_in_another_file(tmp_path):
+    from types import ModuleType
+    rules = ModuleType("my_rules")
+
+    def make(source):
+        exec(source, rules.__dict__)
+        check = rules.check
+
+        @metric
+        def rule(sample):
+            return check(sample)
+        return rule
+    assert differs(tmp_path, make("def check(s): return 0"), make("def check(s): return 1")) == ["metrics.rule"]
+    assert differs(tmp_path, make("def check(s): return 0"), make("def check(s): return 0")) == []
+
+    @metric
+    def library(sample):
+        return len(json.dumps(sample.response)) > 0 and pathlib.Path("x").name == "x"
+    assert differs(tmp_path, library, library) == []
+
+
 def test_blank_reference_is_not_sent_and_keyword_call():
     judge = FakeJudge(True)
     out = evaluate([{**ROW, "reference": "  "}], [judge_metric("맞음", "같으면 통과", fields=["reference"])], llm=judge).rows[0]
