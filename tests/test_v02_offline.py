@@ -59,7 +59,7 @@ def test_faithfulness_negative_counts_rejected_by_schema():
                       llm=FakeLLM([{"total_claims": -2, "supported_claims": -1, "reason": "x"}]))
     row = report.rows[0]
     assert row["faithfulness"] is None and row["faithfulness__error"]
-    assert report.stats["faithfulness"] == {"mean": None, "valid": 0, "missing": 1, "errors": 1}
+    assert report.stats["faithfulness"] == {"mean": None, "valid": 0, "missing": 1, "errors": 1, "not_applicable": 0}
 
 
 # B5: context relevance 번호 중복 · 빠짐은 오류

@@ -18,8 +18,10 @@ __all__ = [
     "split_cited_sentences",
     "resolve_citations",
     "quote_in_source",
+    "extract_citations",
+    "diagnose",
 ]
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 _LAZY_EXPORTS = {
     "EvalSample": ("kgonto_rag_eval.schema", "EvalSample"),
@@ -36,6 +38,8 @@ _LAZY_EXPORTS = {
     "split_cited_sentences": ("kgonto_rag_eval.citation", "split_cited_sentences"),
     "resolve_citations": ("kgonto_rag_eval.citation", "resolve_citations"),
     "quote_in_source": ("kgonto_rag_eval.citation", "quote_in_source"),
+    "extract_citations": ("kgonto_rag_eval.citation", "extract_citations"),
+    "diagnose": ("kgonto_rag_eval.diagnose", "diagnose"),
 }
 
 

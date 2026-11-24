@@ -26,16 +26,39 @@ from pydantic import BaseModel, Field
 DEFAULT_PATTERN = r"\[p\.(\d+)\]"   # 예: "월 20만 원입니다 [p.35]"
 
 
+_RANGE = re.compile(r"\[p\.(\d+)\s*[-~\u2013\u2014]\s*(?:p\.)?(\d+)\]")   # [p.1-3] · [p.1~3]
+MAX_RANGE = 50                        # 이보다 넓은 범위는 잘못 적은 것으로 보고 펼치지 않음
+
+
+def expand_ranges(text: str) -> str:
+    """출처 범위를 하나씩으로: "가 [p.1-3]" -> "가 [p.1][p.2][p.3]". 거꾸로 된 범위 · 너무 넓은 범위는 그대로 둡니다."""
+    def one(m: re.Match) -> str:
+        first, last = int(m.group(1)), int(m.group(2))
+        if last < first or last - first >= MAX_RANGE:
+            return m.group(0)
+        return "".join(f"[p.{n}]" for n in range(first, last + 1))
+    return _RANGE.sub(one, text or "")
+
+
+def extract_citations(answer: str, pattern: str = DEFAULT_PATTERN, ranges: bool = True) -> list[str]:
+    """답에 적힌 출처 ID 를 적힌 순서대로(중복 포함) 뽑습니다. ranges=True 면 [p.1-3] 을 펼칩니다."""
+    text = expand_ranges(answer) if ranges else (answer or "")
+    return re.findall(pattern, text)
+
+
 def _squash(text: str) -> str:
     return re.sub(r"\s+", "", text or "")
 
 
-def split_cited_sentences(answer: str, pattern: str = DEFAULT_PATTERN) -> list[dict]:
+def split_cited_sentences(answer: str, pattern: str = DEFAULT_PATTERN, ranges: bool = False) -> list[dict]:
     """답을 문장으로 나누고 문장마다 출처 ID 를 뽑습니다.
 
     반환: [{"sentence": 출처 표시를 뺀 문장, "citations": [ID, ...]}]
     출처 표시가 문장 끝 마침표 뒤에 붙어도 앞 문장의 것으로 봅니다.
+    ranges=True 면 [p.1-3] 같은 범위를 펼칩니다(기본 False - 0.2 와 같은 결과).
     """
+    if ranges:
+        answer = expand_ranges(answer)
     cite = re.sub(r"\((?!\?)", "(?:", pattern)             # 묶음 없는 판 (옮기기용)
     # 마침표 뒤에 붙은 출처를 마침표 앞으로 옮긴다: "A. [p.1] B." -> "A [p.1]. B."
     moved = re.sub(rf"([.!?。])((?:\s*{cite})+)", lambda m: m.group(2) + m.group(1), answer.strip())
@@ -88,7 +111,7 @@ def _supports(llm, sentence: str, texts: list[str], question: Optional[str]) -> 
 
 
 def citation_support(answer: str, corpus: dict, llm, question: Optional[str] = None,
-                     pattern: str = DEFAULT_PATTERN) -> dict:
+                     pattern: str = DEFAULT_PATTERN, ranges: bool = False) -> dict:
     """ALCE 아이디어를 적용한 수업용 인용 지표(LLM 판정).
 
     corpus: 출처 ID -> 원문. 풀리지 않는 ID 는 뒷받침하지 않는 출처로 셉니다.
@@ -101,7 +124,7 @@ def citation_support(answer: str, corpus: dict, llm, question: Optional[str] = N
     keys = {str(k): v for k, v in corpus.items()}
     rows = []
     n_cited = n_supported = n_cites = n_good = 0
-    for item in split_cited_sentences(answer, pattern):
+    for item in split_cited_sentences(answer, pattern, ranges):
         ids = [str(c) for c in item["citations"]]
         if not ids:
             rows.append({**item, "supported": None, "good_citations": [], "reason": "", "judgements": []})

@@ -161,9 +161,9 @@ def test_explain_wrong_names():
         report.explain("없음")
     with pytest.raises(KeyError):
         report.explain("s0", "faithfulness")
-    dup = evaluate(rows(1) + rows(1), [Length()])
+    report.rows.append(dict(report.rows[0]))      # 같은 ID 가 두 번 (evaluate 는 0.3 부터 미리 막음)
     with pytest.raises(ValueError):
-        dup.explain("s0")
+        report.explain("s0")
 
 
 # 인용 이유

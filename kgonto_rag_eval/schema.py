@@ -1,9 +1,10 @@
 """평가 데이터 스키마. RAGAS 의 EvaluationDataset 관례를 따르되 가볍게."""
 from __future__ import annotations
 
-from typing import Any, Optional
+import math
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _to_text(ctx: Any) -> str:
@@ -49,14 +50,31 @@ class MetricResult(BaseModel):
     score: 0~1. 평가할 수 없으면(reference 없음 · judge 오류) None.
     error: judge 출력이 규칙을 어겼거나 호출이 실패하면 그 이유. 이때 score 는 None 입니다
         (오류를 낮은 품질 점수로 숨기지 않기 위해).
+    status: ok(점수 있음) | not_applicable(채점할 대상이 아님) | error(채점 실패). 비우면 score · error 로 정해집니다.
+    reason_code: invalid_input · no_required_facts · no_citation 같은 짧은 코드(표에서 세기 좋게).
     """
     metric: str
     score: Optional[float] = None
     verdict: Optional[str] = None   # pass | partial | fail
     reason: str = ""
-    failed_component: Optional[str] = None   # retriever | generator | reference | judge
+    failed_component: Optional[str] = None   # retriever | generator | reference | judge | input | metric
     error: Optional[str] = None
     details: dict = Field(default_factory=dict)
+    status: Optional[Literal["ok", "not_applicable", "error"]] = None
+    reason_code: Optional[str] = None
+
+    @field_validator("score")
+    @classmethod
+    def _check_score(cls, v):
+        if v is not None and not (math.isfinite(v) and 0 <= v <= 1):
+            raise ValueError(f"점수는 0 ~ 1 이어야 합니다: {v}")
+        return v
+
+    @model_validator(mode="after")
+    def _fill_status(self):
+        if self.status is None:
+            self.status = "error" if self.error else ("ok" if self.score is not None else "not_applicable")
+        return self
 
     @staticmethod
     def verdict_from_score(score: Optional[float]) -> Optional[str]:
@@ -93,14 +111,16 @@ class EvalReport(BaseModel):
 
     rows: 샘플별 점수 행(입력 · 판정 세부 · 오류 포함).
     summary: 지표별 평균(유효 점수만, 반올림).
-    stats: 지표별 {mean(반올림 전), valid, missing, errors} - 평균이 몇 건에서 나왔는지 함께 봅니다.
+    stats: 지표별 {mean(반올림 전), valid, missing, errors, not_applicable} - 평균이 몇 건에서 나왔는지 함께 봅니다.
+    meta: 무엇으로 채점했는지(패키지 판 · 지표와 프롬프트 · 판정 모델 · 문항 해시 · run_meta). 기준선 비교에 씁니다.
     """
     rows: list[dict]
     summary: dict
     stats: dict = Field(default_factory=dict)
+    meta: dict = Field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {"rows": self.rows, "summary": self.summary, "stats": self.stats}
+        return {"rows": self.rows, "summary": self.summary, "stats": self.stats, "meta": self.meta}
 
     def to_pandas(self):
         import pandas as pd  # pandas 는 선택 의존성
@@ -125,7 +145,7 @@ class EvalReport(BaseModel):
             raise KeyError(f"지표가 없습니다: {metric} (있는 지표: {names})")
 
         def one(name: str) -> dict:
-            parts = ("verdict", "reason", "failed_component", "details", "error")
+            parts = ("verdict", "reason", "failed_component", "details", "error", "status", "reason_code")
             return {"metric": name, "score": row.get(name), **{k: row.get(f"{name}__{k}") for k in parts}}
 
         base = {k: row.get(k) for k in ("sample_id", "user_input", "response", "reference")}

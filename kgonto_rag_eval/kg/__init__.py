@@ -10,6 +10,7 @@ from .graph_eval import (
     schema_violation_rate,
 )
 from .io import load_kg
+from .query_eval import compare_result_rows, entity_link_recall, evidence_bundle_coverage
 from .retrieval_eval import path_entity_recall, path_recall, path_triples, triple_coverage
 from .traceability import source_traceability
 
@@ -38,6 +39,10 @@ __all__ = [
     "triple_coverage",
     "path_triples",
     "source_traceability",
+    # 0.3: GraphRAG 중간 단계 (실행 결과 · 출발점 · 근거 묶음)
+    "compare_result_rows",
+    "entity_link_recall",
+    "evidence_bundle_coverage",
 ]
 
 _LAZY_EXPORTS = {
